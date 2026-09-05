@@ -25,3 +25,4 @@ if [ "$ready" != "1" ]; then
 fi
 
 JOBTRACKR_URL="$BASE_URL" npm run test:e2e
+JOBTRACKR_URL="$BASE_URL" npm run test:security
