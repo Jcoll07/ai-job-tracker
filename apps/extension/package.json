@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "wxt",
+    "prebuild": "sh ../../scripts/generate-extension-icons.sh",
     "build": "wxt build",
+    "prebuild:safari": "sh ../../scripts/generate-extension-icons.sh",
     "build:safari": "wxt build -b safari",
     "zip": "wxt zip",
     "typecheck": "wxt prepare && tsc --noEmit"
