@@ -12,6 +12,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test:e2e": "sh scripts/e2e-local.sh",
     "test:security": "sh scripts/security-smoke.sh",
+    "test:security:unit": "node --experimental-strip-types scripts/security-unit.ts",
     "verify:local": "sh scripts/local-verify.sh"
   },
   "engines": { "node": ">=22.13.0" }
