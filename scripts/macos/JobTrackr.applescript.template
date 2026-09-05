@@ -21,7 +21,7 @@ on ensureServer()
     set serverRunning to do shell script "if [ -f " & quoted form of pidFile & " ] && kill -0 $(cat " & quoted form of pidFile & ") 2>/dev/null; then echo yes; else echo no; fi"
     if serverRunning is "yes" then return my waitForServer()
 
-    set launchCommand to "/bin/zsh -lc " & quoted form of ("cd " & quoted form of projectDir & " && command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 || { echo 'Node.js/npm no están disponibles en el entorno de macOS.' >> " & quoted form of logFile & "; exit 127; }; nohup npm run start >> " & quoted form of logFile & " 2>&1 < /dev/null & echo $! > " & quoted form of pidFile)
+    set launchCommand to "/bin/zsh -lc " & quoted form of ("cd " & quoted form of projectDir & " && command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 || { echo 'Node.js/npm no están disponibles en el entorno de macOS.' >> " & quoted form of logFile & "; exit 127; }; nohup npm run start --workspace=apps/web >> " & quoted form of logFile & " 2>&1 < /dev/null & echo $! > " & quoted form of pidFile)
     do shell script launchCommand
     return my waitForServer()
 end ensureServer
