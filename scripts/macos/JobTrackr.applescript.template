@@ -10,7 +10,7 @@ on run
     else
         set logHint to ""
         try
-            set logTail to do shell script "/usr/bin/tail -n 8 " & quoted form of logFile
+            set logTail to do shell script "/usr/bin/tail -n 12 " & quoted form of logFile
             set logHint to return & return & logTail
         end try
         display alert "JobTrackr no se pudo iniciar" message "No se pudo arrancar el servidor local en el puerto " & appPort & "." & logHint as warning
@@ -18,19 +18,19 @@ on run
 end run
 
 on ensureServer()
-    set serverRunning to do shell script "if [ -f " & quoted form of pidFile & " ] && kill -0 $(cat " & quoted form of pidFile & ") 2>/dev/null; then echo yes; else echo no; fi"
+    set serverRunning to do shell script "if [ -f " & quoted form of pidFile & " ] && kill -0 $(cat " & quoted form of pidFile & ") 2>/dev/null && /usr/bin/curl -s -o /dev/null --max-time 2 http://127.0.0.1:" & appPort & "; then echo yes; else echo no; fi"
     if serverRunning is "yes" then return my waitForServer()
 
-    set launchCommand to "/bin/zsh -lc " & quoted form of ("cd " & quoted form of projectDir & " && command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 || { echo 'Node.js/npm no están disponibles en el entorno de macOS.' >> " & quoted form of logFile & "; exit 127; }; nohup npm run start --workspace=apps/web >> " & quoted form of logFile & " 2>&1 < /dev/null & echo $! > " & quoted form of pidFile)
+    set launchCommand to "/bin/zsh -lc " & quoted form of ("cd " & quoted form of projectDir & " || exit 1; export PATH=\"/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH\"; command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 || { echo 'Node.js/npm no están disponibles en el entorno de macOS.' >> " & quoted form of logFile & "; exit 127; }; if [ ! -d node_modules ] || [ ! -x node_modules/.bin/next ]; then echo 'Instalando dependencias...' >> " & quoted form of logFile & "; npm ci >> " & quoted form of logFile & " 2>&1 || exit $?; fi; if [ ! -f apps/web/.next/BUILD_ID ]; then echo 'Generando build de producción...' >> " & quoted form of logFile & "; npm run build >> " & quoted form of logFile & " 2>&1 || exit $?; fi; nohup npm run start --workspace=apps/web >> " & quoted form of logFile & " 2>&1 < /dev/null & echo $! > " & quoted form of pidFile)
     do shell script launchCommand
     return my waitForServer()
 end ensureServer
 
 on waitForServer()
-    repeat 30 times
+    repeat 60 times
         try
-            set statusCode to do shell script "/usr/bin/curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:" & appPort
-            if statusCode is "200" or statusCode is "304" or statusCode is "307" or statusCode is "308" then return true
+            set statusCode to do shell script "/usr/bin/curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://127.0.0.1:" & appPort
+            if statusCode is "200" or statusCode is "301" or statusCode is "302" or statusCode is "304" or statusCode is "307" or statusCode is "308" then return true
         end try
         delay 0.5
     end repeat
