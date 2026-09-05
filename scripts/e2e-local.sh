@@ -6,6 +6,7 @@ PASS=0
 FAIL=0
 SKIP=0
 JOB_ID=""
+CORE_ID=""
 
 pass(){ PASS=$((PASS+1)); printf '  PASS  %s\n' "$1"; }
 fail(){ FAIL=$((FAIL+1)); printf '  FAIL  %s\n' "$1"; }
@@ -14,6 +15,9 @@ skip(){ SKIP=$((SKIP+1)); printf '  SKIP  %s\n' "$1"; }
 cleanup(){
   if [ -n "$JOB_ID" ]; then
     curl -sS -o /dev/null -X DELETE "$BASE_URL/api/jobs/$JOB_ID" || true
+  fi
+  if [ -n "$CORE_ID" ]; then
+    curl -sS -o /dev/null -X DELETE "$BASE_URL/api/jobs/$CORE_ID" || true
   fi
 }
 trap cleanup EXIT INT TERM
@@ -100,7 +104,12 @@ if [ "$code" = "201" ]; then
   out=$(request PATCH "/api/jobs/$CORE_ID" '{"notes":"E2E updated"}'); code=$(printf '%s\n' "$out" | tail -n1)
   [ "$code" = "200" ] && pass "job patch -> 200" || fail "job patch -> $code"
   out=$(request DELETE "/api/jobs/$CORE_ID"); code=$(printf '%s\n' "$out" | tail -n1)
-  [ "$code" = "200" ] && pass "job delete -> 200" || fail "job delete -> $code"
+  if [ "$code" = "200" ]; then
+    CORE_ID=""
+    pass "job delete -> 200"
+  else
+    fail "job delete -> $code"
+  fi
 else
   fail "core job create -> $code"
 fi
