@@ -1,0 +1,14 @@
+import { NextRequest, NextResponse } from "next/server";
+import { EMPTY_PROFILE } from "@jobtrackr/core";
+import { getSetting } from "@/lib/db";
+import { getJob } from "@/lib/jobs";
+import { getCvVersion, createCvVersion } from "@/lib/cv";
+import { aiAvailable, tailorCv } from "@/lib/ai";
+
+export async function POST(req:NextRequest,{params}:{params:Promise<{id:string}>}){
+  const id=Number((await params).id); const job=getJob(id); if(!job)return NextResponse.json({error:"Job not found"},{status:404});
+  if(!aiAvailable())return NextResponse.json({error:"AI provider is not configured."},{status:503});
+  const body=await req.json().catch(()=>({})) as {cvVersionId?:number}; const profile=getSetting("profile")??EMPTY_PROFILE;
+  const cv=body.cvVersionId?getCvVersion(body.cvVersionId):job.cvVersionId?getCvVersion(job.cvVersionId):null; if(!cv)return NextResponse.json({error:"Create or select a CV version first."},{status:400});
+  try{const content=await tailorCv({job,profile,cv});const created=createCvVersion({name:`${cv.name} → ${job.company} / ${job.jobTitle}`,family:cv.family,summary:`Tailored for ${job.company} — ${job.jobTitle}. Source CV #${cv.id}.`,content});return NextResponse.json({cv:created});}catch(error){return NextResponse.json({error:error instanceof Error?error.message:"CV tailoring failed"},{status:500});}
+}
