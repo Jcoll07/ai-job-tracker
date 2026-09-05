@@ -2,12 +2,12 @@
 
 Track every job application with near-zero manual effort:
 
-- **One-click capture** — a Chrome extension detects job postings (LinkedIn, Indeed, Greenhouse, Lever, Ashby, Workday…) and saves them to your tracker with structured fields.
+- **One-click capture** — the browser extension detects job postings (LinkedIn, Indeed, Greenhouse, Lever, Ashby, Workday…) and saves them to your tracker with structured fields.
 - **Autofill applications** — the extension fills application forms from your saved profile (name, links, work authorization, salary, stock answers). You review and hit Submit.
 - **Capture from your phone** — the app is an installable PWA: on Android, share any job link straight into the tracker; on iPhone, a 2-minute Shortcut does the same. Reach your local instance from anywhere with Tailscale, or deploy it.
-- **Self-updating statuses** — Gmail monitoring pulls hiring-team emails, classifies them with Claude (confirmation / assessment / interview / offer / rejection), links them to the right application, and moves the status forward automatically. Ambiguous emails land in a review inbox.
+- **Self-updating statuses** — Gmail monitoring pulls hiring-team emails, classifies them with the configured AI provider (local oMLX by default; Claude is optional), links them to the right application, and moves the status forward automatically. Ambiguous emails land in a review inbox.
 - **Batch-apply with Claude in Chrome** — a `/apply` skill for Claude Code (`claude --chrome` in this repo) drives your real browser through the saved-jobs pile: fills each form from your profile — including sites that resist scripted autofill — waits for you to review and submit, then updates the tracker.
-- **Full tracker** — search, filter, sort, bulk operations, status history, notes, per-job email timeline, JSON export/import (your v1 backup imports directly).
+- **Full tracker** — search, filter, sort, bulk operations, status history, notes, per-job email timeline, JSON export/import (your v1 backup imports directly into v2).
 
 > The previous single-file app lives in [`legacy/`](legacy/) and still works; export its backup and import it in Settings → Data.
 
@@ -15,29 +15,43 @@ Track every job application with near-zero manual effort:
 
 ```
 apps/web         Next.js app — tracker UI, API, Gmail sync, AI parsing (SQLite storage)
-apps/extension   Chrome extension (WXT) — capture + autofill
+apps/extension   Browser extension (WXT) — capture + autofill
 packages/core    Shared types, schemas, classification taxonomy
 legacy/          The original v1 single-file app
-docs/SETUP.md    Step-by-step setup (API keys, Gmail OAuth, extension install)
+docs/SETUP.md    Detailed setup (API keys, Gmail OAuth, extension install)
+scripts/         Local and CI verification scripts
 ```
 
 ## Quick start
 
 ```bash
 npm install
-cp apps/web/.env.example apps/web/.env.local   # add your ANTHROPIC_API_KEY (and Google creds later)
-npm run dev                                     # http://localhost:3000
+cp apps/web/.env.example apps/web/.env.local   # only if .env.local does not already exist
+npm run dev                                     # http://localhost:3001
 ```
 
-Works with no keys at all for manual tracking. Add keys to unlock:
+### One-command verification
+
+The repository now includes a complete local verifier. It installs dependencies, creates a missing `.env.local` without overwriting an existing one, typechecks, builds the web app and both extension targets, starts/reuses the local server, runs the authenticated E2E smoke test, and checks the configured local AI endpoint without printing its key.
+
+```bash
+npm run verify:local
+```
+
+This is the only local diagnostic command needed. If the verifier reports a failure, its output identifies the failing stage; do not copy individual commands from the output unless you specifically want to debug manually.
+
+Works with no AI keys at all for manual tracking. Add the local oMLX key to unlock AI parsing/drafting and email classification:
 
 | Feature | Needs |
 |---|---|
-| AI parsing (URL / paste / describe / extension capture on unstructured pages) | `ANTHROPIC_API_KEY` |
-| Email monitoring + auto status updates | `ANTHROPIC_API_KEY` + Google OAuth credentials |
-| Extension capture on pages with structured data | nothing |
+| Manual tracking, search, filters, status history, notes, import/export | nothing |
+| AI parsing (URL / paste / describe / extension capture on unstructured pages) | local oMLX/OpenAI-compatible endpoint + API key, or explicit Anthropic provider |
+| Email monitoring + automatic status updates | AI provider + Google OAuth credentials |
+| Extension capture on pages with structured data | nothing beyond the local server |
 
-### Chrome extension
+## Browser extension
+
+The extension supports the browser targets built by WXT. For Chrome:
 
 ```bash
 npm run build:extension
@@ -45,52 +59,45 @@ npm run build:extension
 
 Then `chrome://extensions` → enable Developer mode → **Load unpacked** → select
 `apps/extension/.output/chrome-mv3`. Open the popup → Settings and paste the
-Server URL + token shown in the web app under **Settings → Chrome Extension**.
+Server URL + token shown in the web app under **Settings → Browser Extension**.
 
-### Gmail monitoring
+For Safari on macOS:
 
-See [docs/SETUP.md](docs/SETUP.md) — 5 minutes in Google Cloud Console for a
-read-only Gmail OAuth client, then click **Connect Gmail** in Settings. Sync
-runs on demand from the dashboard, and on a 30-minute schedule when deployed
-(Vercel Cron is preconfigured in `apps/web/vercel.json`).
+```bash
+npm run build:safari --workspace=apps/extension
+```
+
+Then package the generated Safari extension with Xcode's Safari Web Extension Packager and build/run the generated macOS containing app. Apple documents the packager and the temporary-development installation flow in its Safari Web Extension documentation.
+
+## Gmail monitoring
+
+See [docs/SETUP.md](docs/SETUP.md) for the Google OAuth configuration. The app uses read-only Gmail access. After OAuth is configured, click **Connect Gmail** in Settings. Sync can be triggered from the dashboard and is also scheduled when deployed.
 
 ## How email monitoring works
 
-1. Gmail is queried (read-only scope) for mail from known ATS domains
-   (greenhouse.io, lever.co, ashbyhq.com, workday, …), from the email domains
-   of companies you track, and for hiring-related subjects.
-2. Each new email is classified by Claude into: confirmation, assessment
-   invite, interview invite, offer, rejection, recruiter outreach, or other.
-3. Emails are matched to your applications by sender domain, then company name.
-4. High-confidence classifications that move an application **forward**
-   (Applied → Interview → Offer / Rejected) are applied automatically and
-   recorded in the job's status history. Everything else waits in
-   **Email Inbox** for a one-click accept/dismiss.
+1. Gmail is queried (read-only scope) for mail from known ATS domains (greenhouse.io, lever.co, ashbyhq.com, workday, …), from the email domains of companies you track, and for hiring-related subjects.
+2. Each new email is classified by the configured AI provider into: confirmation, assessment invite, interview invite, offer, rejection, recruiter outreach, or other.
+3. Emails are matched to applications by sender domain, then company name.
+4. High-confidence classifications that move an application **forward** (Applied → Interview → Offer / Rejected) are applied automatically and recorded in the job's status history. Everything else waits in **Email Inbox** for a one-click accept/dismiss.
 
 ## Privacy
 
 - All data lives in a local SQLite file (`apps/web/data/jobtracker.db`) — or your own database if you deploy.
 - Gmail access is read-only; tokens are stored in your database, never sent anywhere else.
-- Email/job content is sent only to the Anthropic API for parsing/classification.
+- Email/job content is sent only to the AI provider you explicitly configure. With `AI_PROVIDER=local`, content is sent to your local oMLX/OpenAI-compatible server.
 - The extension talks only to *your* server, authenticated with a token you control.
 
 ## Deploying (optional)
 
-The app runs fine locally forever. To get scheduled email sync without your
-machine running, deploy `apps/web` to Vercel (or any Node host):
+The app runs fine locally forever. To get scheduled email sync without your machine running, deploy `apps/web` to Vercel (or any Node host):
 
-1. Swap SQLite for a hosted database (the data layer is isolated in
-   `apps/web/src/lib/db.ts`) — e.g. Turso/libSQL is a near drop-in.
-2. Set env vars (`ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID/SECRET`, `APP_URL`,
-   `CRON_SECRET`) and add your deployed callback URL to the Google OAuth client.
+1. Swap SQLite for a hosted database (the data layer is isolated in `apps/web/src/lib/db.ts`) — e.g. Turso/libSQL is a near drop-in.
+2. Set env vars (`AI_PROVIDER`, `AI_BASE_URL`, `AI_MODEL`, `AI_API_KEY`, `GOOGLE_CLIENT_ID/SECRET`, `APP_URL`, `CRON_SECRET`) and add your deployed callback URL to the Google OAuth client.
 3. `vercel.json` already schedules `/api/gmail/sync` every 30 minutes.
 
 ## What the extension does — and doesn't
 
-Capture and autofill are assistive: the extension never submits an application
-for you. Fully automated submission violates LinkedIn/Indeed terms of service
-and breaks constantly; review-and-submit keeps your accounts safe while
-removing ~95% of the typing.
+Capture and autofill are assistive: the extension never submits an application for you. Fully automated submission violates job-board terms of service and breaks constantly; review-and-submit keeps your accounts safe while removing most of the typing.
 
 ## License
 
