@@ -12,14 +12,16 @@ npm run dev        # http://localhost:3001
 
 Manual job tracking works immediately. AI, Gmail, CV tailoring and extension capture are enabled by the steps below.
 
+For a complete local diagnostic, use the single command `npm run verify:local`.
+
 ## 2. Local AI (default)
 
 The app defaults to an OpenAI-compatible local endpoint:
 
 ```env
 AI_PROVIDER=local
-AI_BASE_URL=http://127.0.0.1:8080/v1
-AI_MODEL=qwen3-8b
+AI_BASE_URL=http://127.0.0.1:8000/v1
+AI_MODEL=Qwen2.5.1-Coder-7B-Instruct-4bit
 ```
 
 Point these variables at your local MLX/oMLX server. The server must expose `POST /v1/chat/completions`. No job posting or email body is sent to Anthropic when `AI_PROVIDER=local`.
@@ -49,30 +51,27 @@ APP_URL=http://localhost:3001
 ```
 
 6. Restart the app and use **Settings → Connect Gmail**.
-7. Run **Sync Gmail** from the dashboard or let the local launchd/cron scheduler call the sync endpoint.
+7. Run **Sync Gmail** from the dashboard.
 
-The tracker uses the `gmail.readonly` scope. It does not send, modify or delete mail. Google documents `gmail.readonly` as the scope for viewing Gmail messages/settings. citeturn0search0
+The tracker uses the `gmail.readonly` scope. It does not send, modify or delete mail.
+
+For hosted deployments, configure `CRON_SECRET`. The repository's `vercel.json` schedules `/api/gmail/sync` every 30 minutes, and Vercel supplies the cron authorization header.
 
 ## 4. Safari extension
 
-The extension uses WXT's cross-browser API and the same source code can target Safari, Chrome, Firefox and Edge. WXT provides a unified `browser` API across these browsers. citeturn0search1turn0search4
+The extension uses WXT's cross-browser API and the same source code can target Safari and Chromium-based browsers.
 
-Build:
-
-```bash
-npm run build:safari --workspace=apps/extension
-```
-
-For Safari packaging on macOS:
+To build and package Safari on macOS:
 
 ```bash
-cd apps/extension
-xcrun safari-web-extension-packager .output/safari-mv2
+npm run package:safari
 ```
 
-Open the generated Xcode project, build/run the macOS Safari Web Extension target, and enable it under Safari Settings → Extensions. WXT exposes a browser-specific build flag (`-b safari`). citeturn0search5
+This builds the Safari target and runs Apple's Safari Web Extension Packager, generating a macOS Xcode project under `apps/extension/safari/`. Apple documents that the packager creates the containing app and Xcode project, with `--copy-resources` copying the extension resources into the generated project. citeturn0search0turn0search1
 
-In the extension popup, set the server URL to `http://localhost:3001` and paste the token shown under **Settings → Safari Extension**.
+Open the generated Xcode project, build/run the macOS containing app, and enable JobTrackr under Safari → Settings → Extensions. For unsigned development extensions, Safari may require allowing unsigned extensions. citeturn0search10
+
+In the extension popup, set the server URL to `http://localhost:3001` and paste the token shown under **Settings → Browser Extension**.
 
 ## 5. Capture and autofill
 
@@ -93,43 +92,30 @@ Open **CV Manager** from the top navigation.
 6. Use **AI tailor → new CV version**. The source version is never overwritten.
 7. Review the generated CV and use **Print / Save PDF** to produce the final PDF from Safari's print dialog.
 
-The tailoring prompt is explicitly constrained to facts present in the source CV/profile and is not allowed to invent employers, dates, technologies, metrics or responsibilities.
+The tailoring prompt is constrained to facts present in the source CV/profile and is not allowed to invent employers, dates, technologies, metrics or responsibilities.
 
-## 7. Automatic Gmail sync on macOS
-
-The repository includes a local launchd setup. It can trigger Gmail sync according to the interval configured in **Settings** while the web app is running. No cloud scheduler is required.
-
-For a simple cron setup, add a random `CRON_SECRET` to `.env.local` and call:
-
-```bash
-curl -s -H "Authorization: Bearer YOUR_CRON_SECRET" http://localhost:3001/api/gmail/sync
-```
-
-The local scheduler should remain bound to localhost unless you intentionally add authenticated remote access.
-
-## 8. Backup
+## 7. Backup
 
 **Settings → Data** exports jobs and CV source versions to JSON. Import accepts the old v1 job-only backup format and the new backup format; duplicates are skipped.
 
 Local runtime data is stored under `apps/web/data/` and is not committed to Git.
 
-## 9. Validation
+## 8. Validation
 
 From the repository root:
 
 ```bash
-npm run typecheck
-npm run build
-npm run build:extension
-npm run build:safari
+npm run verify:local
 ```
 
-The repository CI workflow runs these checks automatically on pushes to the feature branch and pull requests to `main`.
+This runs dependency installation, typechecking, production builds, Chrome/Safari extension builds, authenticated API E2E tests and a local AI connectivity check.
+
+The repository CI workflow runs the build and E2E validation automatically on pushes to `main`/feature branches and pull requests to `main`.
 
 ## Troubleshooting
 
 - **Local AI unavailable:** verify the endpoint responds at `AI_BASE_URL/v1/chat/completions`, then confirm `AI_MODEL` matches the model served by your local runtime.
 - **Gmail `redirect_uri_mismatch`:** the Google Cloud redirect URI must exactly match `http://localhost:3001/api/gmail/callback` for the local setup.
 - **Extension red dot:** confirm the web app is running on port 3001 and that the extension token matches Settings.
-- **Safari extension not visible:** rebuild with `-b safari`, package through Xcode, run the Safari Web Extension target, then enable it in Safari Settings → Extensions.
+- **Safari extension not visible:** run `npm run package:safari`, build/run the generated containing app in Xcode, then enable the extension in Safari Settings → Extensions. For unsigned development builds, allow unsigned extensions if Safari requires it. citeturn0search10
 - **LinkedIn capture is incomplete:** use the extension while the job page is open; server-side URL fetching can be blocked by some sites.
