@@ -1,13 +1,19 @@
 property projectDir : "__PROJECT_DIR__"
 property appPort : "3001"
 property pidFile : projectDir & "/.jobtrackr-server.pid"
+property logFile : projectDir & "/.jobtrackr-server.log"
 
 on run
     set serverReady to my ensureServer()
     if serverReady then
         do shell script "open -a Safari http://127.0.0.1:" & appPort
     else
-        display alert "JobTrackr no se pudo iniciar" message "Comprueba que Node.js y las dependencias del proyecto estén instalados." as warning
+        set logHint to ""
+        try
+            set logTail to do shell script "/usr/bin/tail -n 8 " & quoted form of logFile
+            set logHint to return & return & logTail
+        end try
+        display alert "JobTrackr no se pudo iniciar" message "No se pudo arrancar el servidor local en el puerto " & appPort & "." & logHint as warning
     end if
 end run
 
@@ -15,7 +21,7 @@ on ensureServer()
     set serverRunning to do shell script "if [ -f " & quoted form of pidFile & " ] && kill -0 $(cat " & quoted form of pidFile & ") 2>/dev/null; then echo yes; else echo no; fi"
     if serverRunning is "yes" then return my waitForServer()
 
-    set launchCommand to "cd " & quoted form of projectDir & " && (nohup npm run start > .jobtrackr-server.log 2>&1 < /dev/null & echo $! > " & quoted form of pidFile & ")"
+    set launchCommand to "/bin/zsh -lc " & quoted form of ("cd " & quoted form of projectDir & " && command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 || { echo 'Node.js/npm no están disponibles en el entorno de macOS.' >> " & quoted form of logFile & "; exit 127; }; nohup npm run start >> " & quoted form of logFile & " 2>&1 < /dev/null & echo $! > " & quoted form of pidFile)
     do shell script launchCommand
     return my waitForServer()
 end ensureServer
@@ -23,8 +29,8 @@ end ensureServer
 on waitForServer()
     repeat 30 times
         try
-            set statusCode to do shell script "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:" & appPort
-            if statusCode is "200" or statusCode is "304" then return true
+            set statusCode to do shell script "/usr/bin/curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:" & appPort
+            if statusCode is "200" or statusCode is "304" or statusCode is "307" or statusCode is "308" then return true
         end try
         delay 0.5
     end repeat
