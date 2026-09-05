@@ -1,0 +1,32 @@
+property projectDir : "__PROJECT_DIR__"
+property appPort : "3001"
+property pidFile : projectDir & "/.jobtrackr-server.pid"
+
+on run
+    set serverReady to my ensureServer()
+    if serverReady then
+        do shell script "open -a Safari http://127.0.0.1:" & appPort
+    else
+        display alert "JobTrackr no se pudo iniciar" message "Comprueba que Node.js y las dependencias del proyecto estén instalados." as warning
+    end if
+end run
+
+on ensureServer()
+    set running to do shell script "if [ -f " & quoted form of pidFile & " ] && kill -0 $(cat " & quoted form of pidFile & ") 2>/dev/null; then echo yes; else echo no; fi"
+    if running is "yes" then return my waitForServer()
+
+    set launchCommand to "cd " & quoted form of projectDir & " && (npm run start > .jobtrackr-server.log 2>&1 & echo $! > " & quoted form of pidFile & ")"
+    do shell script launchCommand
+    return my waitForServer()
+end ensureServer
+
+on waitForServer()
+    repeat 30 times
+        try
+            set statusCode to do shell script "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:" & appPort
+            if statusCode is "200" or statusCode is "304" then return true
+        end try
+        delay 0.5
+    end repeat
+    return false
+end waitForServer
