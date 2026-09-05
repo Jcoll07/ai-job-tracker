@@ -3,6 +3,12 @@ import { disconnectGmail, gmailConnected, syncGmail } from "@/lib/gmail";
 
 export const maxDuration = 300;
 
+function isLocalRequest(req: NextRequest): boolean {
+  const host = req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "";
+  const hostname = host.split(":")[0].toLowerCase();
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
+}
+
 async function runSync() {
   if (!gmailConnected()) {
     return NextResponse.json({ error: "Gmail is not connected" }, { status: 409 });
@@ -18,8 +24,14 @@ async function runSync() {
   }
 }
 
-/** Manual sync from the UI. */
-export async function POST() {
+/** Manual sync from the local UI. */
+export async function POST(req: NextRequest) {
+  if (!isLocalRequest(req)) {
+    return NextResponse.json(
+      { error: "Manual Gmail sync is available only from the local app." },
+      { status: 403 },
+    );
+  }
   return runSync();
 }
 
@@ -32,8 +44,14 @@ export async function GET(req: NextRequest) {
   return runSync();
 }
 
-/** Disconnect Gmail. */
-export async function DELETE() {
+/** Disconnect Gmail from the local app. */
+export async function DELETE(req: NextRequest) {
+  if (!isLocalRequest(req)) {
+    return NextResponse.json(
+      { error: "Gmail disconnect is available only from the local app." },
+      { status: 403 },
+    );
+  }
   disconnectGmail();
   return NextResponse.json({ ok: true });
 }
