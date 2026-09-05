@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "wxt",
     "build": "wxt build",
+    "build:safari": "wxt build -b safari",
     "zip": "wxt zip",
     "typecheck": "wxt prepare && tsc --noEmit"
   },
