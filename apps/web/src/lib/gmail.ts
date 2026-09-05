@@ -1,4 +1,3 @@
-import crypto from "node:crypto";
 import {
   CATEGORY_TO_STATUS,
   TERMINAL_STATUSES,
@@ -11,7 +10,6 @@ import { listJobs, matchJobForEmail, shouldAutoApply, updateJob } from "./jobs";
 const SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me";
-const OAUTH_STATE_KEY = "gmailOAuthState";
 
 /** Well-known ATS sender domains — emails from these are almost always hiring-related. */
 const ATS_DOMAINS = [
@@ -61,16 +59,11 @@ export function gmailConnected(): boolean {
 export function disconnectGmail(): void {
   deleteSetting("gmailTokens");
   deleteSetting("gmailLastSyncAt");
-  deleteSetting(OAUTH_STATE_KEY);
 }
 
 export function buildAuthUrl(): string {
   const c = creds();
   if (!c) throw new Error("GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set");
-
-  const state = crypto.randomBytes(32).toString("hex");
-  setSetting(OAUTH_STATE_KEY, state);
-
   const params = new URLSearchParams({
     client_id: c.clientId,
     redirect_uri: redirectUri(),
@@ -78,22 +71,8 @@ export function buildAuthUrl(): string {
     scope: SCOPE,
     access_type: "offline",
     prompt: "consent",
-    state,
   });
   return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
-}
-
-export function consumeOAuthState(state: string): boolean {
-  const expected = getSetting<string>(OAUTH_STATE_KEY);
-  deleteSetting(OAUTH_STATE_KEY);
-  if (!expected || !state) return false;
-
-  const expectedBuffer = Buffer.from(expected, "utf8");
-  const actualBuffer = Buffer.from(state, "utf8");
-  return (
-    expectedBuffer.length === actualBuffer.length &&
-    crypto.timingSafeEqual(expectedBuffer, actualBuffer)
-  );
 }
 
 export async function exchangeCode(code: string): Promise<void> {
