@@ -71,7 +71,7 @@ export async function POST(req: Request) {
     if (!fields) {
       if (!aiAvailable()) {
         return NextResponse.json(
-          { error: "No structured data on this page and ANTHROPIC_API_KEY is not set" },
+          { error: "No local AI provider is configured and the page has no usable structured data" },
           { status: 503, headers: CORS_HEADERS },
         );
       }
