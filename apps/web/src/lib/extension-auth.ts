@@ -33,9 +33,19 @@ export function corsPreflight(): NextResponse {
 export function requireExtensionAuth(req: Request): NextResponse | null {
   const header = req.headers.get("authorization") ?? "";
   const token = header.replace(/^Bearer\s+/i, "");
-  if (token && token === getExtensionToken()) return null;
+  const expected = getExtensionToken();
+  const provided = Buffer.from(token, "utf8");
+  const actual = Buffer.from(expected, "utf8");
+  const authorized =
+    provided.length === actual.length && timingSafeEqualSafe(provided, actual);
+
+  if (authorized) return null;
   return NextResponse.json(
     { error: "Invalid or missing extension token" },
     { status: 401, headers: CORS_HEADERS },
   );
+}
+
+function timingSafeEqualSafe(a: Buffer, b: Buffer): boolean {
+  return crypto.timingSafeEqual(a, b);
 }
