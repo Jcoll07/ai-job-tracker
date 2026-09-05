@@ -7,7 +7,8 @@
     "dev": "npm run dev --workspace=apps/web",
     "build": "npm run build --workspace=packages/core && npm run build --workspace=apps/web",
     "build:extension": "npm run build --workspace=apps/extension",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test:e2e": "sh scripts/e2e-local.sh"
   },
   "engines": { "node": ">=22.13.0" }
 }
