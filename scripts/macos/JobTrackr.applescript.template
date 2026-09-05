@@ -15,7 +15,7 @@ on ensureServer()
     set running to do shell script "if [ -f " & quoted form of pidFile & " ] && kill -0 $(cat " & quoted form of pidFile & ") 2>/dev/null; then echo yes; else echo no; fi"
     if running is "yes" then return my waitForServer()
 
-    set launchCommand to "cd " & quoted form of projectDir & " && (npm run start > .jobtrackr-server.log 2>&1 & echo $! > " & quoted form of pidFile & ")"
+    set launchCommand to "cd " & quoted form of projectDir & " && (nohup npm run start > .jobtrackr-server.log 2>&1 < /dev/null & echo $! > " & quoted form of pidFile & ")"
     do shell script launchCommand
     return my waitForServer()
 end ensureServer
