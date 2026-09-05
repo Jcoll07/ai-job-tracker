@@ -5,24 +5,17 @@ import { Nav } from "./nav";
 
 const syne = Syne({ subsets: ["latin"], weight: ["700", "800"], variable: "--font-display" });
 const inter = Inter({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-body" });
-const geistMono = Geist_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500"],
-  variable: "--font-mono",
-});
+const geistMono = Geist_Mono({ subsets: ["latin"], weight: ["400", "500"], variable: "--font-mono" });
 
 export const metadata: Metadata = {
   title: "JobTrackr",
   description: "AI-powered job application tracker",
   manifest: "/manifest.webmanifest",
   icons: { icon: "/icons/icon-192.png", apple: "/icons/icon-192.png" },
-  appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "JobTrackr" },
+  appleWebApp: { capable: true, statusBarStyle: "default", title: "JobTrackr" },
 };
 
-export const viewport = {
-  themeColor: "#16241E",
-  viewportFit: "cover",
-};
+export const viewport = { themeColor: "#176B4D", viewportFit: "cover" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
