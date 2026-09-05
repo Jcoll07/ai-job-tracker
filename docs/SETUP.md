@@ -3,155 +3,133 @@
 ## 1. Install & run
 
 ```bash
-git clone https://github.com/lbwalton/ai-job-tracker.git
+git clone https://github.com/Jcoll07/ai-job-tracker.git
 cd ai-job-tracker
 npm install
 cp apps/web/.env.example apps/web/.env.local
-npm run dev        # http://localhost:3000
+npm run dev        # http://localhost:3001
 ```
 
-The tracker works immediately for manual entry. The steps below unlock the AI
-and automation features.
+Manual job tracking works immediately. AI, Gmail, CV tailoring and extension capture are enabled by the steps below.
 
-## 2. Claude API key (AI parsing + email classification)
+## 2. Local AI (default)
 
-1. Create a key at <https://platform.claude.com> (API Keys).
-2. Put it in `apps/web/.env.local`:
-   ```
-   ANTHROPIC_API_KEY=sk-ant-...
-   ```
-3. Restart `npm run dev`.
+The app defaults to an OpenAI-compatible local endpoint:
 
-Cost: parsing a job posting or classifying an email uses Claude Haiku and
-costs a fraction of a cent. A heavy job-search month is well under a dollar.
+```env
+AI_PROVIDER=local
+AI_BASE_URL=http://127.0.0.1:8080/v1
+AI_MODEL=qwen3-8b
+```
+
+Point these variables at your local MLX/oMLX server. The server must expose `POST /v1/chat/completions`. No job posting or email body is sent to Anthropic when `AI_PROVIDER=local`.
+
+For an explicit cloud fallback only:
+
+```env
+AI_PROVIDER=anthropic
+ANTHROPIC_API_KEY=...
+ANTHROPIC_MODEL=claude-haiku-4-5
+```
+
+Restart the web app after changing environment variables.
 
 ## 3. Gmail monitoring (read-only)
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com) → create/select a project.
-2. **APIs & Services → Library** → enable **Gmail API**.
-3. **APIs & Services → OAuth consent screen** → External → add yourself as a test user.
-4. **APIs & Services → Credentials → Create Credentials → OAuth Client ID**:
-   - Type: **Web application**
-   - Authorized redirect URI: `http://localhost:3000/api/gmail/callback`
-5. Copy the Client ID and Client Secret into `apps/web/.env.local`:
-   ```
-   GOOGLE_CLIENT_ID=xxxx.apps.googleusercontent.com
-   GOOGLE_CLIENT_SECRET=GOCSPX-...
-   APP_URL=http://localhost:3000
-   ```
-6. Restart, open **Settings → Connect Gmail**, approve the read-only scope.
-7. Click **Sync Gmail** on the dashboard. New hiring emails are classified,
-   linked to applications, and confident status changes are applied
-   automatically; the rest appear in **Email Inbox** for review.
+1. In Google Cloud Console, create/select a project and enable the **Gmail API**.
+2. Configure the OAuth consent screen and add your Google account as a test user if the app is external.
+3. Create an OAuth **Web application** client.
+4. Authorized redirect URI: `http://localhost:3001/api/gmail/callback`.
+5. Put the client ID/secret in `apps/web/.env.local`:
 
-Only the `gmail.readonly` scope is requested — the app can never send,
-modify, or delete mail.
-
-## 4. Chrome extension (capture + autofill)
-
-```bash
-npm run build:extension
+```env
+GOOGLE_CLIENT_ID=....apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=....
+APP_URL=http://localhost:3001
 ```
 
-1. Open `chrome://extensions`, enable **Developer mode**.
-2. **Load unpacked** → select `apps/extension/.output/chrome-mv3`.
-3. In the web app, open **Settings → Chrome Extension** and copy the Server
-   URL and token.
-4. Open the extension popup → **Settings**, paste both, **Save & Test**.
+6. Restart the app and use **Settings → Connect Gmail**.
+7. Run **Sync Gmail** from the dashboard or let the local launchd/cron scheduler call the sync endpoint.
 
-Usage:
+The tracker uses the `gmail.readonly` scope. It does not send, modify or delete mail. Google documents `gmail.readonly` as the scope for viewing Gmail messages/settings. citeturn0search0
 
-- On any job posting: popup → **Save this job to tracker**. Sites with
-  structured data (most ATS boards) save instantly; anything else is parsed
-  by Claude.
-- On an application form: fill your **Autofill Profile** in the web app once,
-  then popup → **Autofill application form**. Matched fields are filled
-  (never overwriting anything you typed); attach your resume and submit.
+## 4. Safari extension
 
-## 5. Saving jobs from your phone
+The extension uses WXT's cross-browser API and the same source code can target Safari, Chrome, Firefox and Edge. WXT provides a unified `browser` API across these browsers. citeturn0search1turn0search4
 
-No native app needed — the tracker is an installable PWA with a share target.
-The one prerequisite: your phone must be able to reach the app. Pick one:
+Build:
 
-- **Tailscale (recommended for local-first):** install Tailscale on your
-  computer and phone (free personal plan), then open
-  `http://<your-machine-tailnet-name>:3000` from the phone — works from
-  anywhere, nothing exposed to the internet. Keep `npm run dev` (or
-  `npm run build && npm start` inside `apps/web`) running on the computer.
-- **Same Wi-Fi:** `http://<your-computer-ip>:3000`.
-- **Deploy it** (step 7) for an always-on URL.
+```bash
+npm run build:safari --workspace=apps/extension
+```
 
-> Gmail note: do the one-time **Connect Gmail** step from the computer at
-> `http://localhost:3000` — Google only allows plain-http OAuth redirects on
-> localhost. Once connected, tokens live in the database and syncing works no
-> matter how you reach the app afterward.
+For Safari packaging on macOS:
 
-**Android (share sheet, most seamless):**
+```bash
+cd apps/extension
+xcrun safari-web-extension-packager .output/safari-mv2
+```
 
-1. Open the tracker in Chrome on your phone → menu → **Add to Home screen →
-   Install**.
-2. From LinkedIn/Indeed/any browser: **Share → JobTrackr**. The shared link is
-   analyzed by AI and you get a one-tap "Save for later" / "I applied already"
-   screen.
+Open the generated Xcode project, build/run the macOS Safari Web Extension target, and enable it under Safari Settings → Extensions. WXT exposes a browser-specific build flag (`-b safari`). citeturn0search5
 
-**iPhone (Shortcuts):**
+In the extension popup, set the server URL to `http://localhost:3001` and paste the token shown under **Settings → Safari Extension**.
 
-iOS doesn't support PWA share targets, so use a one-time Shortcut:
+## 5. Capture and autofill
 
-1. Shortcuts app → **+** → name it "Save to JobTrackr".
-2. Add action **Get URLs from Input**.
-3. Add action **Get Contents of URL**:
-   - URL: `https://<your-app>/api/extension/capture`
-   - Method: **POST**, Request Body: **JSON** with one field:
-     `url` = *URLs* (the variable from step 2)
-   - Headers: `Authorization` = `Bearer <your extension token>` (from
-     Settings → Chrome Extension)
-4. In the Shortcut's settings (ⓘ), enable **Show in Share Sheet** (accepts
-   URLs).
+- On LinkedIn, Indeed, Greenhouse, Lever, Workday or another job page: open the extension and choose **Save this job to tracker**.
+- On an application form: complete **Profile**, select a CV version in **CV Manager**, then use **Autofill application form**.
+- The extension fills fields but never submits the application for you.
+- Resume attachment is best-effort because some ATS upload widgets intentionally reject programmatic file assignment.
 
-Now Share → **Save to JobTrackr** from any app captures the posting — the
-server fetches and parses it, so it works even though the phone never opens
-the tracker. You can also always just open the app in Safari/Chrome and use
-**/capture** to paste a link.
+## 6. CV Manager
 
-## 6. Import your v1 data
+Open **CV Manager** from the top navigation.
 
-In the old single-file app: Configuration Setup → **Export Backup**.
-In the new app: **Settings → Data → Import Backup**. Duplicates are skipped.
+1. Create a factual source CV for each target family (Product Engineer, Process Engineer, Industrialisation Engineer, R&D / Solution Architect, Automation Engineer, General Engineering).
+2. Paste the source CV text into the version.
+3. Optionally attach a PDF/DOC/DOCX file to that version.
+4. On a tracked job, open its detail page. The **Fit Score** explains experience, technical, industry, education, location and seniority components and lists strengths/gaps.
+5. Assign the CV version used for the application.
+6. Use **AI tailor → new CV version**. The source version is never overwritten.
+7. Review the generated CV and use **Print / Save PDF** to produce the final PDF from Safari's print dialog.
 
-## 7. Optional: hands-off scheduled sync
+The tailoring prompt is explicitly constrained to facts present in the source CV/profile and is not allowed to invent employers, dates, technologies, metrics or responsibilities.
 
-Locally, email sync runs when you click **Sync Gmail**. Two ways to make it
-automatic:
+## 7. Automatic Gmail sync on macOS
 
-**A. Cron on your own machine** (keeps everything local):
+The repository includes a local launchd setup. It can trigger Gmail sync according to the interval configured in **Settings** while the web app is running. No cloud scheduler is required.
 
-1. Add a random `CRON_SECRET=...` to `apps/web/.env.local` and restart.
-2. `crontab -e` and add:
-   ```
-   */30 * * * * curl -s -H "Authorization: Bearer YOUR_CRON_SECRET" http://localhost:3000/api/gmail/sync
-   ```
-   (macOS users can use a LaunchAgent instead.) Syncs run whenever the app is
-   up; missed windows are harmless — the next sync catches up.
+For a simple cron setup, add a random `CRON_SECRET` to `.env.local` and call:
 
-**B. Deploy `apps/web`** (Vercel config included) so sync runs even with your
-computer off:
+```bash
+curl -s -H "Authorization: Bearer YOUR_CRON_SECRET" http://localhost:3001/api/gmail/sync
+```
 
-- Replace SQLite with a hosted DB (edit `apps/web/src/lib/db.ts`; Turso/libSQL
-  is nearly drop-in, or any Postgres with a small rewrite of the SQL).
-- Set `ANTHROPIC_API_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
-  `APP_URL=https://your-app.vercel.app`, and a random `CRON_SECRET`.
-- Add `https://your-app.vercel.app/api/gmail/callback` to the OAuth client's
-  redirect URIs.
+The local scheduler should remain bound to localhost unless you intentionally add authenticated remote access.
+
+## 8. Backup
+
+**Settings → Data** exports jobs and CV source versions to JSON. Import accepts the old v1 job-only backup format and the new backup format; duplicates are skipped.
+
+Local runtime data is stored under `apps/web/data/` and is not committed to Git.
+
+## 9. Validation
+
+From the repository root:
+
+```bash
+npm run typecheck
+npm run build
+npm run build:extension
+npm run build:safari
+```
+
+The repository CI workflow runs these checks automatically on pushes to the feature branch and pull requests to `main`.
 
 ## Troubleshooting
 
-- **“ANTHROPIC_API_KEY is not configured”** — add the key to
-  `apps/web/.env.local` and restart the dev server.
-- **Gmail `redirect_uri_mismatch`** — the redirect URI in Google Cloud must be
-  exactly `${APP_URL}/api/gmail/callback`.
-- **Extension shows a red dot** — the web app isn't running, or the token
-  doesn't match (Settings → Chrome Extension → Regenerate, then re-paste).
-- **URL analysis fails on some sites** — LinkedIn and some boards block server
-  fetches. Use the extension capture (reads the page you're already on) or
-  Copy & Paste mode instead.
+- **Local AI unavailable:** verify the endpoint responds at `AI_BASE_URL/v1/chat/completions`, then confirm `AI_MODEL` matches the model served by your local runtime.
+- **Gmail `redirect_uri_mismatch`:** the Google Cloud redirect URI must exactly match `http://localhost:3001/api/gmail/callback` for the local setup.
+- **Extension red dot:** confirm the web app is running on port 3001 and that the extension token matches Settings.
+- **Safari extension not visible:** rebuild with `-b safari`, package through Xcode, run the Safari Web Extension target, then enable it in Safari Settings → Extensions.
+- **LinkedIn capture is incomplete:** use the extension while the job page is open; server-side URL fetching can be blocked by some sites.

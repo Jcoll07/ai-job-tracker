@@ -8,7 +8,7 @@ export interface ExtensionSettings {
 export async function getSettings(): Promise<ExtensionSettings> {
   const data = await browser.storage.local.get(["serverUrl", "token"]);
   return {
-    serverUrl: (data.serverUrl as string) || "http://localhost:3000",
+    serverUrl: (data.serverUrl as string) || "http://localhost:3001",
     token: (data.token as string) || "",
   };
 }

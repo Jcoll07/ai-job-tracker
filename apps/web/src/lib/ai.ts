@@ -1,147 +1,21 @@
 import Anthropic from "@anthropic-ai/sdk";
-import {
-  CLASSIFIED_EMAIL_JSON_SCHEMA,
-  PARSED_JOB_JSON_SCHEMA,
-  classifiedEmailSchema,
-  parsedJobSchema,
-  type ClassifiedEmail,
-  type ParsedJob,
-  type Profile,
-} from "@jobtrackr/core";
+import { CLASSIFIED_EMAIL_JSON_SCHEMA, PARSED_JOB_JSON_SCHEMA, classifiedEmailSchema, parsedJobSchema, type ClassifiedEmail, type ParsedJob, type Profile } from "@jobtrackr/core";
 
-// Haiku keeps parsing/classification at fractions of a cent per call; override
-// with ANTHROPIC_MODEL if you want a stronger model.
-const MODEL = process.env.ANTHROPIC_MODEL || "claude-haiku-4-5";
+type AiProvider = "local" | "anthropic";
+const PROVIDER=(process.env.AI_PROVIDER||"local") as AiProvider;
+const LOCAL_BASE_URL=(process.env.AI_BASE_URL||"http://127.0.0.1:8080/v1").replace(/\/$/,"");
+const LOCAL_MODEL=process.env.AI_MODEL||"qwen3-8b"; const ANTHROPIC_MODEL=process.env.ANTHROPIC_MODEL||"claude-haiku-4-5";
+export function aiAvailable():boolean{return PROVIDER==="anthropic"?Boolean(process.env.ANTHROPIC_API_KEY):Boolean(LOCAL_BASE_URL&&LOCAL_MODEL);}
+function anthropicClient():Anthropic{return new Anthropic();}
+function extractJson(text:string):unknown{const cleaned=text.trim().replace(/^```(?:json)?\s*/i,"").replace(/\s*```$/i,"").trim();try{return JSON.parse(cleaned);}catch{const s=cleaned.indexOf("{");const e=cleaned.lastIndexOf("}");if(s>=0&&e>s)return JSON.parse(cleaned.slice(s,e+1));throw new Error("AI returned invalid JSON");}}
+async function localRequest(system:string,user:string,options?:{schema?:object;maxTokens?:number;json?:boolean}):Promise<string>{const body:Record<string,unknown>={model:LOCAL_MODEL,temperature:.1,max_tokens:options?.maxTokens??1500,messages:[{role:"system",content:system},{role:"user",content:user}]};if(options?.schema)body.response_format={type:"json_schema",json_schema:{name:"jobtrackr_response",strict:true,schema:options.schema}};else if(options?.json)body.response_format={type:"json_object"};const r=await fetch(`${LOCAL_BASE_URL}/chat/completions`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(body),signal:AbortSignal.timeout(120000)});if(!r.ok){const d=await r.text().catch(()=>"");throw new Error(`Local AI request failed (HTTP ${r.status})${d?`: ${d.slice(0,500)}`:""}`);}const data=await r.json() as {choices?:Array<{message?:{content?:string|null}}>};const c=data.choices?.[0]?.message?.content;if(!c)throw new Error("Local AI returned no content");return c;}
+async function structuredRequest(system:string,user:string,schema:object,maxTokens=1500):Promise<unknown>{if(PROVIDER==="anthropic"){const r=await anthropicClient().messages.create({model:ANTHROPIC_MODEL,max_tokens:maxTokens,system,messages:[{role:"user",content:user}],...({output_config:{format:{type:"json_schema",schema}}} as Record<string,unknown>)} as Anthropic.MessageCreateParamsNonStreaming);const t=r.content.find(b=>b.type==="text");if(!t||t.type!=="text")throw new Error("AI returned no text content");return JSON.parse(t.text);}try{return extractJson(await localRequest(system,user,{schema,maxTokens}));}catch(error){if(error instanceof Error&&/HTTP 400|HTTP 404|HTTP 422/.test(error.message))return extractJson(await localRequest(`${system}\nReturn ONLY a single valid JSON object. No markdown or commentary.`,user,{json:true,maxTokens}));throw error;}}
+async function textRequest(system:string,user:string,maxTokens=700):Promise<string>{if(PROVIDER==="anthropic"){const r=await anthropicClient().messages.create({model:ANTHROPIC_MODEL,max_tokens:maxTokens,system,messages:[{role:"user",content:user}]});const t=r.content.find(b=>b.type==="text");if(!t||t.type!=="text")throw new Error("AI returned no text content");return t.text.trim();}return(await localRequest(system,user,{maxTokens})).trim();}
+export async function parseJobPosting(content:string):Promise<ParsedJob>{const raw=await structuredRequest("You extract structured data from job postings. Extract only what is stated or confidently inferred; use null for unknown fields. Never invent requirements.",`Extract the job application details from:\n\n${content.slice(0,24000)}`,PARSED_JOB_JSON_SCHEMA);return parsedJobSchema.parse(raw);}
+export async function draftAnswer(input:{question:string;profile:Profile;job?:{company:string;jobTitle:string;description:string|null;skills:string|null}|null}):Promise<string>{const{question,profile,job}=input;const facts=[profile.currentTitle&&profile.currentCompany?`Current role: ${profile.currentTitle} at ${profile.currentCompany}`:"",profile.yearsOfExperience?`Years of experience: ${profile.yearsOfExperience}`:"",profile.location?`Location: ${profile.location}`:"",profile.background?`Background:\n${profile.background.slice(0,8000)}`:"",profile.coverLetterTemplate?`Cover letter template:\n${profile.coverLetterTemplate.slice(0,2000)}`:"",profile.customAnswers.length?`Existing stock answers:\n${profile.customAnswers.filter(q=>q.question&&q.answer).map(q=>`Q: ${q.question}\nA: ${q.answer}`).join("\n")}`:""].filter(Boolean).join("\n\n");const response=await textRequest("You draft job-application answers in first person. Use ONLY provided facts. Never invent numbers, employers, dates or achievements. Missing facts become [bracketed placeholders]. Return only the answer.",[ `Application question: ${question}`,job?`Role: ${job.jobTitle} at ${job.company}. ${job.description??""}\nSkills: ${job.skills??""}`:"No specific company context.",`Applicant facts:\n${facts||"(profile empty)"}`].join("\n\n"));return response.replace(/\s*—\s*/g,", ");}
+export async function classifyEmail(input:{from:string;subject:string;body:string;trackedCompanies:string[]}):Promise<ClassifiedEmail>{const raw=await structuredRequest("You classify hiring emails. Marketing/job-board digests are other_job_related, never confirmations or rejections.",[ `Tracked companies: ${input.trackedCompanies.slice(0,100).join(", ")||"(none)"}`,`From: ${input.from}`,`Subject: ${input.subject}`,`Body:\n${input.body.slice(0,6000)}`].join("\n\n"),CLASSIFIED_EMAIL_JSON_SCHEMA,800);return classifiedEmailSchema.parse(raw);}
 
-export function aiAvailable(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY);
-}
-
-function client(): Anthropic {
-  return new Anthropic();
-}
-
-async function structuredRequest(
-  system: string,
-  user: string,
-  schema: object,
-  maxTokens = 1500,
-): Promise<unknown> {
-  const response = await client().messages.create({
-    model: MODEL,
-    max_tokens: maxTokens,
-    system,
-    messages: [{ role: "user", content: user }],
-    // Structured outputs: constrains the response to valid JSON per schema.
-    ...({
-      output_config: { format: { type: "json_schema", schema } },
-    } as Record<string, unknown>),
-  } as Anthropic.MessageCreateParamsNonStreaming);
-
-  const text = response.content.find((b) => b.type === "text");
-  if (!text || text.type !== "text") {
-    throw new Error("AI returned no text content");
-  }
-  return JSON.parse(text.text);
-}
-
-export async function parseJobPosting(content: string): Promise<ParsedJob> {
-  const raw = await structuredRequest(
-    [
-      "You extract structured data from job postings and free-form descriptions of job applications.",
-      "Extract only what is stated or can be confidently inferred; use null for unknown fields.",
-      "For emailDomain, infer the company's likely email domain from its website or name (e.g. 'acme.com'); null if you cannot infer it confidently.",
-    ].join(" "),
-    `Extract the job application details from the following content:\n\n${content.slice(0, 24000)}`,
-    PARSED_JOB_JSON_SCHEMA,
-  );
-  return parsedJobSchema.parse(raw);
-}
-
-export async function draftAnswer(input: {
-  question: string;
-  profile: Profile;
-  job?: {
-    company: string;
-    jobTitle: string;
-    description: string | null;
-    skills: string | null;
-  } | null;
-}): Promise<string> {
-  const { question, profile, job } = input;
-  const facts = [
-    profile.currentTitle && profile.currentCompany
-      ? `Current role: ${profile.currentTitle} at ${profile.currentCompany}`
-      : "",
-    profile.yearsOfExperience ? `Years of experience: ${profile.yearsOfExperience}` : "",
-    profile.location ? `Location: ${profile.location}` : "",
-    profile.background ? `Background:\n${profile.background.slice(0, 8000)}` : "",
-    profile.coverLetterTemplate
-      ? `Cover letter template (voice/tone reference):\n${profile.coverLetterTemplate.slice(0, 2000)}`
-      : "",
-    profile.customAnswers.length
-      ? `Existing stock answers:\n${profile.customAnswers
-          .filter((qa) => qa.question && qa.answer)
-          .map((qa) => `Q: ${qa.question}\nA: ${qa.answer}`)
-          .join("\n")}`
-      : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-
-  const response = await client().messages.create({
-    model: MODEL,
-    max_tokens: 700,
-    system: [
-      "You draft job-application answers in the applicant's first-person voice.",
-      "Use ONLY the facts provided — never invent numbers, employers, dates, or achievements.",
-      "If a fact the answer needs is missing, write a [bracketed placeholder] the applicant fills in.",
-      "Confident and specific, not sycophantic. No em-dashes. 80-160 words unless the question clearly wants a one-liner.",
-      "Return only the answer text — no preamble, no quotes.",
-    ].join(" "),
-    messages: [
-      {
-        role: "user",
-        content: [
-          `Application question: ${question}`,
-          job
-            ? `The application is for: ${job.jobTitle} at ${job.company}.` +
-              (job.description ? `\nAbout the role: ${job.description.slice(0, 2000)}` : "") +
-              (job.skills ? `\nSkills they want: ${job.skills}` : "")
-            : "No specific company context — write a reusable stock answer.",
-          `Applicant facts:\n${facts || "(profile is empty — use placeholders)"}`,
-        ].join("\n\n"),
-      },
-    ],
-  });
-
-  const text = response.content.find((b) => b.type === "text");
-  if (!text || text.type !== "text") throw new Error("AI returned no text content");
-  // House style: no em-dashes in drafted answers.
-  return text.text.trim().replace(/\s*—\s*/g, ", ");
-}
-
-export async function classifyEmail(input: {
-  from: string;
-  subject: string;
-  body: string;
-  trackedCompanies: string[];
-}): Promise<ClassifiedEmail> {
-  const raw = await structuredRequest(
-    [
-      "You classify emails for a job-application tracker.",
-      "Decide whether the email relates to the user's job search and, if so, what kind of hiring email it is.",
-      "application_confirmation = 'we received your application'. assessment_invite = coding test / take-home. interview_invite = scheduling or confirming interviews. offer = a job offer. rejection = the candidacy is over. recruiter_outreach = a recruiter contacting the user about a new role. other_job_related = job-related but none of the above (newsletters, job alerts, status unchanged). not_job_related = everything else.",
-      "Marketing blasts from job boards (Indeed/LinkedIn digests) are other_job_related with low confidence, never rejections or confirmations.",
-    ].join(" "),
-    [
-      `The user is tracking applications at these companies: ${input.trackedCompanies.slice(0, 100).join(", ") || "(none yet)"}.`,
-      `From: ${input.from}`,
-      `Subject: ${input.subject}`,
-      `Body:\n${input.body.slice(0, 6000)}`,
-    ].join("\n\n"),
-    CLASSIFIED_EMAIL_JSON_SCHEMA,
-    800,
-  );
-  return classifiedEmailSchema.parse(raw);
-}
+export async function tailorCv(input:{job:{company:string;jobTitle:string;description:string|null;skills:string|null;location:string|null};profile:Profile;cv:{name:string;family:string;content:string}}):Promise<string>{
+  const source=[`CV family: ${input.cv.family}`,`Current CV/source text:\n${input.cv.content.slice(0,16000)}`,`Applicant profile:\n${input.profile.background.slice(0,9000)}`,`Current title/company: ${input.profile.currentTitle} / ${input.profile.currentCompany}`,`Experience: ${input.profile.yearsOfExperience}`].join("\n\n");
+  const job=[`Company: ${input.job.company}`,`Role: ${input.job.jobTitle}`,`Location: ${input.job.location??""}`,`Requirements/skills: ${input.job.skills??""}`,`Description: ${input.job.description??""}`].join("\n");
+  return textRequest("You tailor an engineering CV for a specific job. Use ONLY facts present in the source CV/profile. Never invent employers, projects, technologies, metrics, dates, education or responsibilities. Preserve truthful chronology. Prioritize relevant facts, remove irrelevant detail, and rewrite bullets for clarity and ATS keyword alignment without keyword stuffing. Return a complete CV in clean plain text with sections: SUMMARY, EXPERIENCE, PROJECTS (if present), EDUCATION, SKILLS. If a fact is missing, omit it rather than inventing it.",`JOB POSTING:\n${job}\n\nSOURCE MATERIAL:\n${source}`,1800).then(x=>x.replace(/\s*—\s*/g,", "));}

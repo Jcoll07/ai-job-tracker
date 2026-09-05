@@ -44,7 +44,7 @@ function creds() {
 }
 
 function redirectUri(): string {
-  const base = process.env.APP_URL || "http://localhost:3000";
+  const base = process.env.APP_URL || "http://localhost:3001";
   return `${base.replace(/\/$/, "")}/api/gmail/callback`;
 }
 
@@ -201,7 +201,7 @@ export interface SyncResult {
 
 export async function syncGmail(): Promise<SyncResult> {
   if (!aiAvailable()) {
-    throw new Error("ANTHROPIC_API_KEY is not set — email classification needs it");
+    throw new Error("AI provider is not configured — email classification needs an available provider");
   }
   const db = getDb();
   const result: SyncResult = {
