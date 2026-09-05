@@ -68,6 +68,9 @@ fi
 say "Running full local E2E smoke test"
 JOBTRACKR_URL="$BASE_URL" npm run test:e2e
 
+say "Running API security smoke test"
+JOBTRACKR_URL="$BASE_URL" npm run test:security
+
 say "Checking local AI provider"
 AI_BASE_URL_VALUE=$(grep '^AI_BASE_URL=' apps/web/.env.local 2>/dev/null | tail -n1 | cut -d= -f2- || true)
 AI_API_KEY_VALUE=$(grep '^AI_API_KEY=' apps/web/.env.local 2>/dev/null | tail -n1 | cut -d= -f2- || true)
@@ -86,6 +89,6 @@ else
 fi
 
 say "Verification complete"
-printf '%s\n' "JobTrackr is built, the server starts, and the automated API smoke test passed."
+printf '%s\n' "JobTrackr is built, the server starts, and the automated API/security smoke tests passed."
 printf '%s\n' "Open: $BASE_URL"
 printf '%s\n' "Log (only if needed): $LOG_FILE"
