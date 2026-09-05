@@ -34,7 +34,7 @@ CREATE INDEX IF NOT EXISTS idx_cv_family ON cv_versions(family);
 const MASTER_BACKGROUND = `MASTER CAREER PROFILE — FACTUAL SOURCE FOR CV GENERATION
 
 Identity
-Francisco Javier Coll Díez. Naval Engineer / Service Engineer / R&D Solution Architect. Spanish nationality. Based in Spain; target work is remote/hybrid in Northern Spain. Does not target Madrid or Barcelona. Preferred regions: Galicia, Basque Country and Zaragoza; also open to Asturias, Navarra, Cantabria and La Rioja.
+Applicant identity and contact details are stored only in the local profile. This repository intentionally contains no personal contact information.
 
 Professional positioning
 Naval Engineer specialized in marine robotics with 3+ years of technical experience in hull-cleaning ROV/AUV systems, field service, commissioning, R&D, product validation and continuous improvement. Strong at connecting field support with product improvement through root-cause analysis, data quality, KPIs, technical specifications and cross-functional coordination. Comfortable working autonomously and in international remote environments.
@@ -104,10 +104,10 @@ function seedCareerData(database: Database.Database): void {
   const profileRow = database.prepare("SELECT value FROM settings WHERE key = 'profile'").get() as { value: string } | undefined;
   if (!profileRow) {
     const profile = {
-      firstName: "Francisco Javier",
-      lastName: "Coll Díez",
-      email: "eve_javiercoll@hotmail.com",
-      phone: "+34 628 76 95 78",
+      firstName: "",
+      lastName: "",
+      email: "",
+      phone: "",
       location: "Spain — Remote / Hybrid",
       linkedin: "",
       github: "",
