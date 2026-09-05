@@ -2,6 +2,7 @@ property projectDir : "__PROJECT_DIR__"
 property appPort : "3001"
 property pidFile : projectDir & "/.jobtrackr-server.pid"
 property logFile : projectDir & "/.jobtrackr-server.log"
+property buildCommitFile : projectDir & "/.jobtrackr-build-commit"
 
 on run
     set serverReady to my ensureServer()
@@ -21,7 +22,7 @@ on ensureServer()
     set serverRunning to do shell script "if [ -f " & quoted form of pidFile & " ] && kill -0 $(cat " & quoted form of pidFile & ") 2>/dev/null && /usr/bin/curl -s -o /dev/null --max-time 2 http://127.0.0.1:" & appPort & "; then echo yes; else echo no; fi"
     if serverRunning is "yes" then return my waitForServer()
 
-    set launchCommand to "/bin/zsh -lc " & quoted form of ("cd " & quoted form of projectDir & " || exit 1; export PATH=\"/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH\"; command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 || { echo 'Node.js/npm no están disponibles en el entorno de macOS.' >> " & quoted form of logFile & "; exit 127; }; if [ ! -d node_modules ] || [ ! -x node_modules/.bin/next ]; then echo 'Instalando dependencias...' >> " & quoted form of logFile & "; npm ci >> " & quoted form of logFile & " 2>&1 || exit $?; fi; if [ ! -f apps/web/.next/BUILD_ID ]; then echo 'Generando build de producción...' >> " & quoted form of logFile & "; npm run build >> " & quoted form of logFile & " 2>&1 || exit $?; fi; nohup npm run start --workspace=apps/web >> " & quoted form of logFile & " 2>&1 < /dev/null & echo $! > " & quoted form of pidFile)
+    set launchCommand to "/bin/zsh -lc " & quoted form of ("cd " & quoted form of projectDir & " || exit 1; export PATH=\"/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH\"; command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 || { echo 'Node.js/npm no están disponibles en el entorno de macOS.' >> " & quoted form of logFile & "; exit 127; }; if [ ! -d node_modules ] || [ ! -x node_modules/.bin/next ]; then echo 'Instalando dependencias...' >> " & quoted form of logFile & "; npm ci >> " & quoted form of logFile & " 2>&1 || exit $?; fi; currentCommit=$(git rev-parse HEAD 2>/dev/null || echo unknown); builtCommit=$(cat " & quoted form of buildCommitFile & " 2>/dev/null || echo ''); if [ ! -f apps/web/.next/BUILD_ID ] || [ \"$currentCommit\" != \"$builtCommit\" ]; then echo \"Generando build de producción para $currentCommit...\" >> " & quoted form of logFile & "; npm run build >> " & quoted form of logFile & " 2>&1 || exit $?; printf '%s' \"$currentCommit\" > " & quoted form of buildCommitFile & "; fi; nohup npm run start --workspace=apps/web >> " & quoted form of logFile & " 2>&1 < /dev/null & echo $! > " & quoted form of pidFile)
     do shell script launchCommand
     return my waitForServer()
 end ensureServer
