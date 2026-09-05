@@ -42,7 +42,7 @@ code=$(curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/api/gmail/sync")
 [ "$code" = "401" ] && pass "scheduled Gmail sync rejects missing cron secret" || fail "Gmail sync missing-secret response -> $code"
 
 code=$(curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/api/gmail/callback")
-[ "$code" = "302" ] && pass "Gmail OAuth callback rejects missing code/state via denial redirect" || fail "Gmail callback missing params -> $code"
+[ "$code" = "400" ] && pass "Gmail OAuth callback rejects missing code/state with 400" || fail "Gmail callback missing params -> $code"
 
 code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$BASE_URL/api/import" -H 'Content-Type: application/json' --data '{}')
 [ "$code" = "400" ] && pass "import rejects malformed backup" || fail "malformed import -> $code"
