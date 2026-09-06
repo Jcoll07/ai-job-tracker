@@ -5,6 +5,9 @@ ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 EXT_DIR="$ROOT_DIR/apps/extension"
 OUTPUT_DIR="$EXT_DIR/.output/safari-mv2"
 PROJECT_DIR="$EXT_DIR/safari"
+INSTALL_DIR="${HOME}/Applications"
+CONTAINER_APP="$INSTALL_DIR/JobTrackr Safari Extension.app"
+DERIVED_DIR="$EXT_DIR/.output/safari-derived"
 
 if [ "$(uname -s)" != "Darwin" ]; then
   printf '%s\n' "Safari packaging is only available on macOS." >&2
@@ -48,5 +51,43 @@ PROJECT=$(find "$PROJECT_DIR" -type d -name '*.xcodeproj' -print -quit)
   exit 1
 }
 xcodebuild -list -project "$PROJECT" >/dev/null
-printf '\nSafari Xcode project generated and validated:\n%s\n' "$PROJECT"
-printf '%s\n' "Build/run the macOS target from Xcode, then enable JobTrackr in Safari → Settings → Extensions."
+
+# A Safari web extension becomes available to Safari when its containing macOS
+# app is built and launched. Do that automatically so updating JobTrackr does
+# not require opening Xcode and pressing Run every time. Apple explicitly
+# supports unsigned macOS extensions for local development when Safari's
+# unsigned-extension development setting is enabled.
+SCHEME=$(xcodebuild -list -json -project "$PROJECT" | python3 -c 'import json,sys; d=json.load(sys.stdin); schemes=d.get("project",{}).get("schemes",[]); print(schemes[0] if schemes else "")')
+[ -n "$SCHEME" ] || { printf '%s\n' "No Xcode scheme was found for the generated Safari project." >&2; exit 1; }
+rm -rf "$DERIVED_DIR"
+xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Debug \
+  -derivedDataPath "$DERIVED_DIR" \
+  CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+  build >/dev/null
+
+CONTAINER_SOURCE=""
+for app in "$DERIVED_DIR"/Build/Products/Debug/*.app; do
+  [ -d "$app" ] || continue
+  if find "$app/Contents/PlugIns" -maxdepth 2 -name '*.appex' -print -quit 2>/dev/null | grep -q .; then
+    CONTAINER_SOURCE="$app"
+    break
+  fi
+done
+[ -n "$CONTAINER_SOURCE" ] || {
+  printf '%s\n' "Xcode build completed but no macOS containing app with a Safari .appex was produced." >&2
+  find "$DERIVED_DIR/Build/Products/Debug" -maxdepth 3 -print >&2
+  exit 1
+}
+
+mkdir -p "$INSTALL_DIR"
+rm -rf "$CONTAINER_APP"
+ditto "$CONTAINER_SOURCE" "$CONTAINER_APP"
+open "$CONTAINER_APP"
+
+# Verify the extension bundle is physically embedded before reporting success.
+APPEX=$(find "$CONTAINER_APP/Contents/PlugIns" -maxdepth 2 -name '*.appex' -print -quit 2>/dev/null || true)
+[ -n "$APPEX" ] || { printf '%s\n' "Installed Safari containing app has no embedded extension." >&2; exit 1; }
+
+printf '\nSafari extension packaged, installed and launched:\n%s\n' "$CONTAINER_APP"
+printf 'Embedded extension: %s\n' "$APPEX"
+printf '%s\n' "If Safari has not previously been configured for unsigned development extensions, enable Develop → Allow Unsigned Extensions once. After that, this command installs the updated extension automatically on every rebuild."
