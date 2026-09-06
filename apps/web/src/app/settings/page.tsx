@@ -4,50 +4,24 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/client";
 
 interface Settings { aiConfigured:boolean; gmailConfigured:boolean; gmailConnected:boolean; extensionToken:string; appUrl:string; syncIntervalMinutes:number }
+interface SyncResult { scanned:number; classified:number; linked:number; created:number; personalized:number; errors:string[]; done:boolean; processed:number; total:number }
 
 function SettingsInner(){
-  const [settings,setSettings]=useState<Settings|null>(null);
-  const [loadError,setLoadError]=useState<string|null>(null);
-  const [notice,setNotice]=useState<{kind:"ok"|"err";text:string}|null>(null);
-  const [interval,setIntervalMin]=useState("");
-  const fileRef=useRef<HTMLInputElement>(null);
-
-  const load=useCallback(async()=>{
-    setLoadError(null);
-    const controller=new AbortController();
-    const timeout=window.setTimeout(()=>controller.abort(),8000);
-    try{
-      const s=await api<Settings>("/api/settings",{signal:controller.signal});
-      setSettings(s);
-      setIntervalMin(String(s.syncIntervalMinutes));
-    }catch(error){
-      setLoadError(error instanceof DOMException&&error.name==="AbortError"?"The settings request timed out. Check that the local JobTrackr server is running.":error instanceof Error?error.message:"Unable to load settings.");
-    }finally{
-      window.clearTimeout(timeout);
-    }
-  },[]);
-
-  useEffect(()=>{
-    void load();
-    const gmailResult=new URLSearchParams(window.location.search).get("gmail");
-    if(gmailResult==="connected")setNotice({kind:"ok",text:"Gmail connected!"});
-    if(gmailResult==="error"||gmailResult==="denied")setNotice({kind:"err",text:"Gmail connection failed — check OAuth settings."});
-  },[load]);
-
+  const [settings,setSettings]=useState<Settings|null>(null); const [loadError,setLoadError]=useState<string|null>(null); const [notice,setNotice]=useState<{kind:"ok"|"err";text:string}|null>(null); const [interval,setIntervalMin]=useState(""); const [syncing,setSyncing]=useState(false); const [syncProgress,setSyncProgress]=useState<{processed:number;total:number;created:number;errors:number}|null>(null); const fileRef=useRef<HTMLInputElement>(null);
+  const load=useCallback(async()=>{setLoadError(null);const controller=new AbortController();const timeout=window.setTimeout(()=>controller.abort(),8000);try{const s=await api<Settings>("/api/settings",{signal:controller.signal});setSettings(s);setIntervalMin(String(s.syncIntervalMinutes));}catch(error){setLoadError(error instanceof DOMException&&error.name==="AbortError"?"The settings request timed out. Check that the local JobTrackr server is running.":error instanceof Error?error.message:"Unable to load settings.");}finally{window.clearTimeout(timeout);}},[]);
+  useEffect(()=>{void load();const r=new URLSearchParams(window.location.search).get("gmail");if(r==="connected")setNotice({kind:"ok",text:"Gmail connected!"});if(r==="error"||r==="denied")setNotice({kind:"err",text:"Gmail connection failed — check OAuth settings."});},[load]);
   async function disconnectGmail(){await api("/api/gmail/sync",{method:"DELETE"});setNotice({kind:"ok",text:"Gmail disconnected."});await load();}
+  async function syncGmail(){if(syncing)return;setSyncing(true);setNotice(null);setSyncProgress({processed:0,total:0,created:0,errors:0});let created=0,errors=0;try{for(let i=0;i<2000;i++){const r=await api<{result:SyncResult}>("/api/gmail/sync",{method:"POST"});const x=r.result;created+=x.created;errors+=x.errors.length;setSyncProgress({processed:x.processed,total:x.total,created,errors});if(x.done){setNotice({kind:errors?"err":"ok",text:errors?`Gmail sync completed with ${errors} error(s). Imported ${created} job(s).`:`Gmail sync completed. Imported ${created} job(s).`});break;}await new Promise(resolve=>window.setTimeout(resolve,150));} }catch(e){setNotice({kind:"err",text:e instanceof Error?e.message:"Gmail sync failed"});}finally{setSyncing(false);}}
   async function saveSyncInterval(){const m=Number(interval);if(!Number.isFinite(m))return;const r=await api<{syncIntervalMinutes:number}>("/api/settings",{method:"POST",json:{action:"setSyncInterval",minutes:m}});setIntervalMin(String(r.syncIntervalMinutes));setNotice({kind:"ok",text:`Auto-sync interval set to ${r.syncIntervalMinutes} minutes.`});}
   async function regenerateToken(){if(!confirm("Regenerate? The extension will need the new token."))return;await api("/api/settings",{method:"POST",json:{action:"regenerateExtensionToken"}});await load();}
   async function importBackup(file:File){try{const text=await file.text();const d=await api<{imported:number;skipped:number}>("/api/import",{method:"POST",body:text,headers:{"content-type":"application/json"}});setNotice({kind:"ok",text:`Imported ${d.imported} job(s), skipped ${d.skipped}.`});}catch(e){setNotice({kind:"err",text:e instanceof Error?e.message:"Import failed"});}}
-
   if(loadError)return <div><h1>Settings</h1><div className="notice err">Unable to load settings: {loadError}</div><button className="btn primary" onClick={()=>void load()}>Retry</button></div>;
-  if(!settings)return <p className="muted">Loading…</p>;
-  const check=(ok:boolean)=>ok?"✓":"⚠";
+  if(!settings)return <p className="muted">Loading…</p>; const check=(ok:boolean)=>ok?"✓":"⚠";
   return <div><h1>Settings</h1>{notice&&<div className={`notice ${notice.kind}`}>{notice.text}</div>}
     <div className="card"><h2 style={{marginTop:0}}>{check(settings.aiConfigured)} Local AI</h2><p className="muted">The default provider is a local OpenAI-compatible oMLX server. Set <code className="kbd">AI_BASE_URL</code>, <code className="kbd">AI_MODEL</code> and <code className="kbd">AI_API_KEY</code> in <code className="kbd">apps/web/.env.local</code>. No job or email content is sent to a cloud model when <code className="kbd">AI_PROVIDER=local</code>.</p><p className="muted">Recommended configuration for your oMLX server: <code className="kbd">http://127.0.0.1:8000/v1</code> with model <code className="kbd">Qwen2.5.1-Coder-7B-Instruct-4bit</code>. The API key is sent server-side only and is never exposed to the browser. Anthropic remains available as an explicit fallback via <code className="kbd">AI_PROVIDER=anthropic</code>.</p></div>
-    <div className="card"><h2 style={{marginTop:0}}>{check(settings.gmailConnected)} Gmail Monitoring</h2>{!settings.gmailConfigured?<p>Set <code className="kbd">GOOGLE_CLIENT_ID</code> and <code className="kbd">GOOGLE_CLIENT_SECRET</code> in <code className="kbd">apps/web/.env.local</code>. Use the read-only <code className="kbd">gmail.readonly</code> scope.</p>:settings.gmailConnected?<><div className="row"><span className="muted">Connected. Sync manually or through the scheduler.</span><div className="spacer"/><button className="btn danger" onClick={disconnectGmail}>Disconnect</button></div><div className="row" style={{marginTop:10}}><div className="field"><label>Auto-sync interval (minutes, 5–720)</label><input type="number" min={5} max={720} value={interval} onChange={e=>setIntervalMin(e.target.value)} style={{width:120}}/></div><button className="btn" onClick={saveSyncInterval} style={{alignSelf:"end"}}>Save</button></div></>:<a className="btn primary" href="/api/gmail/auth">Connect Gmail</a>}</div>
+    <div className="card"><h2 style={{marginTop:0}}>{check(settings.gmailConnected)} Gmail Monitoring</h2>{!settings.gmailConfigured?<p>Set <code className="kbd">GOOGLE_CLIENT_ID</code> and <code className="kbd">GOOGLE_CLIENT_SECRET</code> in <code className="kbd">apps/web/.env.local</code>. Use the read-only <code className="kbd">gmail.readonly</code> scope.</p>:settings.gmailConnected?<><div className="row"><span className="muted">Connected. Sync runs in bounded batches so large LinkedIn histories cannot block one HTTP request.</span><div className="spacer"/><button className="btn danger" onClick={disconnectGmail} disabled={syncing}>Disconnect</button></div><div className="row" style={{marginTop:10}}><button className="btn primary" onClick={()=>void syncGmail()} disabled={syncing}>{syncing?"Syncing…":"Sync Gmail now"}</button>{syncProgress&&<span className="muted">{syncProgress.processed}/{syncProgress.total} messages · {syncProgress.created} jobs imported{syncProgress.errors?` · ${syncProgress.errors} errors`:""}</span>}</div><div className="row" style={{marginTop:10}}><div className="field"><label>Auto-sync interval (minutes, 5–720)</label><input type="number" min={5} max={720} value={interval} onChange={e=>setIntervalMin(e.target.value)} style={{width:120}}/></div><button className="btn" onClick={saveSyncInterval} style={{alignSelf:"end"}} disabled={syncing}>Save</button></div></>:<a className="btn primary" href="/api/gmail/auth">Connect Gmail</a>}</div>
     <div className="card"><h2 style={{marginTop:0}}>Safari Extension</h2><ol className="muted" style={{paddingLeft:18,marginTop:0}}><li>Run <code className="kbd">npm run build:safari --workspace=apps/extension</code>.</li><li>From <code className="kbd">apps/extension</code>, package with <code className="kbd">xcrun safari-web-extension-packager .output/safari-mv2</code>.</li><li>Open the generated Xcode project, build/run the macOS Safari Web Extension target, then enable it in Safari Settings → Extensions.</li><li>Set the extension server URL to <code className="kbd">{settings.appUrl}</code> and paste the token below.</li></ol><div className="form-grid"><div className="field"><label>Server URL</label><input readOnly value={settings.appUrl}/></div><div className="field"><label>Extension Token</label><input readOnly className="mono" value={settings.extensionToken}/></div></div><div className="row" style={{marginTop:10}}><button className="btn" onClick={regenerateToken}>Regenerate Token</button><a className="btn" href="/cv">Open CV Manager</a></div></div>
     <div className="card"><h2 style={{marginTop:0}}>Data</h2><div className="row"><a className="btn" href="/api/export">Export Backup (JSON)</a><button className="btn" onClick={()=>fileRef.current?.click()}>Import Backup (v1/v2 JSON)</button><input ref={fileRef} type="file" accept=".json" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(f)void importBackup(f);e.target.value="";}}/></div><p className="muted" style={{marginBottom:0}}>SQLite and CV files remain under the local <code className="kbd">data/</code> directory and are gitignored.</p></div>
   </div>;
 }
-
 export default function SettingsPage(){return <SettingsInner/>;}
