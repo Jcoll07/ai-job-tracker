@@ -7,5 +7,6 @@ export async function GET() {
     configured: gmailConfigured(),
     connected: gmailConnected(),
     lastSync: getSetting("gmailLastSyncResult"),
+    lastSuccessfulSync: getSetting("gmailLastSuccessfulSyncResult"),
   });
 }
