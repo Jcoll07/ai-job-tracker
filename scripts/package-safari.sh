@@ -15,6 +15,7 @@ if [ "$(uname -s)" != "Darwin" ]; then
 fi
 command -v xcrun >/dev/null 2>&1 || { printf '%s\n' "Xcode command-line tools are required (xcrun not found)." >&2; exit 1; }
 [ -x "$(command -v xcodebuild 2>/dev/null || true)" ] || { printf '%s\n' "Xcode is required (xcodebuild not found). Install/open Xcode once and accept its license." >&2; exit 1; }
+command -v plutil >/dev/null 2>&1 || { printf '%s\n' "macOS plutil is required." >&2; exit 1; }
 cd "$ROOT_DIR"
 npm run build:safari --workspace=apps/extension
 [ -d "$OUTPUT_DIR" ] || { printf '%s\n' "Safari build output not found: $OUTPUT_DIR" >&2; exit 1; }
@@ -62,7 +63,7 @@ xcodebuild -list -project "$PROJECT" >/dev/null
 # not require opening Xcode and pressing Run every time. Apple explicitly
 # supports unsigned macOS extensions for local development when Safari's
 # unsigned-extension development setting is enabled.
-SCHEME=$(xcodebuild -list -json -project "$PROJECT" | python3 -c 'import json,sys; d=json.load(sys.stdin); schemes=d.get("project",{}).get("schemes",[]); print(schemes[0] if schemes else "")')
+SCHEME=$(xcodebuild -list -json -project "$PROJECT" | plutil -extract project.schemes.0 raw -o - - 2>/dev/null || true)
 [ -n "$SCHEME" ] || { printf '%s\n' "No Xcode scheme was found for the generated Safari project." >&2; exit 1; }
 rm -rf "$DERIVED_DIR"
 xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Debug \
