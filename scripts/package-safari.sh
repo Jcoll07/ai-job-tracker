@@ -20,7 +20,7 @@ mkdir -p "$PROJECT_DIR"
 
 # Apple renamed the command-line tool from safari-web-extension-converter to
 # safari-web-extension-packager. Prefer the current name but retain the older
-# name because it is still shipped by some Xcode versions (including hosted CI).
+# name because it is still shipped by some Xcode versions.
 if xcrun --find safari-web-extension-packager >/dev/null 2>&1; then
   PACKAGER="safari-web-extension-packager"
 elif xcrun --find safari-web-extension-converter >/dev/null 2>&1; then
@@ -38,8 +38,15 @@ xcrun "$PACKAGER" "$OUTPUT_DIR" \
   --no-prompt \
   --force
 
-PROJECT=$(find "$PROJECT_DIR" -maxdepth 1 -name '*.xcodeproj' -print -quit)
-[ -n "$PROJECT" ] || { printf '%s\n' "Safari Xcode project was not generated." >&2; exit 1; }
+# Xcode's packager can place the generated project one level below the
+# requested location on some Xcode releases. Search recursively rather than
+# assuming a fixed output depth.
+PROJECT=$(find "$PROJECT_DIR" -type d -name '*.xcodeproj' -print -quit)
+[ -n "$PROJECT" ] || {
+  printf '%s\n' "Safari Xcode project was not generated. Contents of output directory:" >&2
+  find "$PROJECT_DIR" -maxdepth 4 -print >&2
+  exit 1
+}
 xcodebuild -list -project "$PROJECT" >/dev/null
 printf '\nSafari Xcode project generated and validated:\n%s\n' "$PROJECT"
 printf '%s\n' "Build/run the macOS target from Xcode, then enable JobTrackr in Safari → Settings → Extensions."
