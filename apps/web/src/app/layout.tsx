@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Syne, Inter, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import "./dashboard-overrides.css";
 import { Nav } from "./nav";
 
 const syne = Syne({ subsets: ["latin"], weight: ["700", "800"], variable: "--font-display" });
