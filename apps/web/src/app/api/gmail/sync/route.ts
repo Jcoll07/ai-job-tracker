@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { disconnectGmail, gmailConnected } from "@/lib/gmail";
 import { getGmailSyncState, syncGmailBatch } from "@/lib/gmail-batch";
+import { deleteSetting } from "@/lib/db";
 
 export const maxDuration = 60;
 
@@ -33,5 +34,6 @@ export async function GET(req: NextRequest) {
 export async function DELETE(req: NextRequest) {
   if (!isLocalRequest(req)) return NextResponse.json({ error: "Gmail disconnect is available only from the local app." }, { status: 403 });
   disconnectGmail();
+  deleteSetting("gmailSyncState");
   return NextResponse.json({ ok: true });
 }
