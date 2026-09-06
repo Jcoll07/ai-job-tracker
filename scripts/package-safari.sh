@@ -79,15 +79,21 @@ done
   exit 1
 }
 
-mkdir -p "$INSTALL_DIR"
-rm -rf "$CONTAINER_APP"
-ditto "$CONTAINER_SOURCE" "$CONTAINER_APP"
-open "$CONTAINER_APP"
+# CI must validate the generated project and embedded .appex, but must not
+# attempt to register a GUI application in the runner. On a user's Mac we
+# install and launch the containing app so Safari receives the extension.
+if [ "${CI:-}" != "true" ]; then
+  mkdir -p "$INSTALL_DIR"
+  rm -rf "$CONTAINER_APP"
+  ditto "$CONTAINER_SOURCE" "$CONTAINER_APP"
+  open "$CONTAINER_APP"
 
-# Verify the extension bundle is physically embedded before reporting success.
-APPEX=$(find "$CONTAINER_APP/Contents/PlugIns" -maxdepth 2 -name '*.appex' -print -quit 2>/dev/null || true)
-[ -n "$APPEX" ] || { printf '%s\n' "Installed Safari containing app has no embedded extension." >&2; exit 1; }
+  APPEX=$(find "$CONTAINER_APP/Contents/PlugIns" -maxdepth 2 -name '*.appex' -print -quit 2>/dev/null || true)
+  [ -n "$APPEX" ] || { printf '%s\n' "Installed Safari containing app has no embedded extension." >&2; exit 1; }
 
-printf '\nSafari extension packaged, installed and launched:\n%s\n' "$CONTAINER_APP"
-printf 'Embedded extension: %s\n' "$APPEX"
-printf '%s\n' "If Safari has not previously been configured for unsigned development extensions, enable Develop → Allow Unsigned Extensions once. After that, this command installs the updated extension automatically on every rebuild."
+  printf '\nSafari extension packaged, installed and launched:\n%s\n' "$CONTAINER_APP"
+  printf 'Embedded extension: %s\n' "$APPEX"
+  printf '%s\n' "If Safari has not previously been configured for unsigned development extensions, enable Develop → Allow Unsigned Extensions once. After that, this command installs the updated extension automatically on every rebuild."
+else
+  printf '\nSafari Xcode project and containing app validated in CI:\n%s\n' "$CONTAINER_SOURCE"
+fi
