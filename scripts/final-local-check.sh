@@ -8,26 +8,16 @@ LOG_FILE="${TMPDIR:-/tmp}/jobtrackr-final.log"
 
 printf '\n=== JobTrackr final local check ===\n'
 printf 'Repository: %s\n' "$ROOT"
-
 git pull --ff-only
 npm install
-
-# Ensure the production server is running the newly pulled code.
 PIDS=$(lsof -tiTCP:$PORT -sTCP:LISTEN 2>/dev/null || true)
-if [ -n "$PIDS" ]; then
-  printf '%s\n' "$PIDS" | xargs kill 2>/dev/null || true
-  sleep 2
-fi
-
+if [ -n "$PIDS" ]; then printf '%s\n' "$PIDS" | xargs kill 2>/dev/null || true; sleep 2; fi
 npm run verify:local
-
-# verify:local stops a server it started. Start one for the live Gmail checks.
 : > "$LOG_FILE"
 (npm run start --workspace=apps/web >"$LOG_FILE" 2>&1) &
 SERVER_PID=$!
 cleanup(){ kill "$SERVER_PID" 2>/dev/null || true; wait "$SERVER_PID" 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
-
 READY=0
 i=0
 while [ "$i" -lt 60 ]; do
@@ -35,12 +25,29 @@ while [ "$i" -lt 60 ]; do
   sleep 1; i=$((i+1))
 done
 [ "$READY" = "1" ] || { cat "$LOG_FILE"; exit 1; }
-
 printf '\n=== Gmail status ===\n'
-curl -sS "$BASE_URL/api/gmail/status"
-printf '\n\n=== Gmail label sync ===\n'
-curl -sS -X POST "$BASE_URL/api/gmail/sync"
-printf '\n\n=== Jobs after sync ===\n'
+STATUS_JSON=$(curl -fsS "$BASE_URL/api/gmail/status")
+printf '%s\n' "$STATUS_JSON"
+printf '\n=== Gmail label sync ===\n'
+SYNC_JSON=$(curl -fsS -X POST "$BASE_URL/api/gmail/sync")
+printf '%s\n' "$SYNC_JSON"
+node -e '
+const status=JSON.parse(process.argv[1]);
+const x=JSON.parse(process.argv[2]);
+if(x.error) throw new Error(x.error);
+const r=x.result;
+if(!r || typeof r.scanned!=="number") throw new Error("Gmail sync returned no result");
+if(r.scanned < 1) throw new Error("Gmail sync scanned 0 messages (label/query did not find mail)");
+if(Array.isArray(r.errors) && r.errors.length) throw new Error(`Gmail sync returned ${r.errors.length} error(s): ${r.errors.join(" | ")}`);
+const successful=status.lastSuccessfulSync;
+const currentProcessed=typeof r.classified==="number"&&r.classified>0&&typeof r.linked==="number"&&r.linked>0;
+const priorProcessed=successful&&typeof successful.classified==="number"&&successful.classified>0&&typeof successful.linked==="number"&&successful.linked>0&&(!Array.isArray(successful.errors)||successful.errors.length===0);
+const historicalProcessed=status.hasHistoricalLinkedMessage===true;
+if(!currentProcessed&&!priorProcessed&&!historicalProcessed) throw new Error("Gmail sync has not yet classified and linked any message successfully");
+const evidence=currentProcessed?"current sync":priorProcessed?"previous successful sync":"existing linked Gmail message";
+console.log(`Gmail functional gate: PASS (${r.scanned} scanned, ${r.classified} classified, ${r.created} created, ${r.linked} linked, ${r.personalized??0} personalized, ${r.statusUpdates.length} status updates, mode=${r.queryMode||"unknown"}, evidence=${evidence})`);
+' "$STATUS_JSON" "$SYNC_JSON"
+printf '\n=== Jobs after sync ===\n'
 curl -sS "$BASE_URL/api/jobs?sort=dateAdded&dir=desc"
 printf '\n\n=== Final check complete ===\n'
 printf 'Server log: %s\n' "$LOG_FILE"
