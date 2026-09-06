@@ -12,19 +12,29 @@ function isLocalRequest(req: NextRequest): boolean {
   return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]";
 }
 
-async function runBatch() {
-  if (!gmailConnected()) return NextResponse.json({ error: "Gmail is not connected" }, { status: 409 });
-  try {
-    return NextResponse.json({ result: await syncGmailBatch() });
-  } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : "Sync failed" }, { status: 502 });
-  }
+function workerSetting(): { running?: boolean; startedAt?: string; finishedAt?: string } | null {
+  return getSetting("gmailSyncWorker");
+}
+
+function statusPayload() {
+  return {
+    syncing: syncWorkerRunning || Boolean(workerSetting()?.running),
+    state: getGmailSyncState(),
+    result: getSetting("gmailLastSyncResult"),
+    error: getSetting("gmailSyncError"),
+  };
+}
+
+function startWorker() {
+  if (syncWorkerRunning || !gmailConnected()) return;
+  void runWorker();
 }
 
 async function runWorker() {
-  if (syncWorkerRunning) return;
+  if (syncWorkerRunning || !gmailConnected()) return;
   syncWorkerRunning = true;
   setSetting("gmailSyncWorker", { running: true, startedAt: new Date().toISOString() });
+  deleteSetting("gmailSyncError");
   try {
     for (let i = 0; i < 2000; i++) {
       const result = await syncGmailBatch();
@@ -43,14 +53,11 @@ async function runWorker() {
 export async function POST(req: NextRequest) {
   if (!isLocalRequest(req)) return NextResponse.json({ error: "Manual Gmail sync is available only from the local app." }, { status: 403 });
   if (!gmailConnected()) return NextResponse.json({ error: "Gmail is not connected" }, { status: 409 });
-  if (!syncWorkerRunning) void runWorker();
-  return NextResponse.json({
-    started: true,
-    syncing: true,
-    state: getGmailSyncState(),
-    result: getSetting("gmailLastSyncResult"),
-    error: getSetting("gmailSyncError"),
-  });
+
+  const persisted = workerSetting();
+  if (!syncWorkerRunning && !persisted?.running) startWorker();
+
+  return NextResponse.json({ started: true, ...statusPayload() });
 }
 
 export async function GET(req: NextRequest) {
@@ -58,17 +65,21 @@ export async function GET(req: NextRequest) {
     const secret = process.env.CRON_SECRET;
     if (!secret || req.headers.get("authorization") !== `Bearer ${secret}`) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  return NextResponse.json({
-    syncing: syncWorkerRunning || Boolean((getSetting<any>("gmailSyncWorker") ?? {}).running),
-    state: getGmailSyncState(),
-    result: getSetting("gmailLastSyncResult"),
-    error: getSetting("gmailSyncError"),
-  });
+
+  // If the browser navigated away while the local worker was still running, a later
+  // page load can resume the persisted queue instead of leaving the UI at 0/0 forever.
+  const persisted = workerSetting();
+  const state = getGmailSyncState() as { queue?: unknown[] } | null;
+  if (gmailConnected() && persisted?.running && !syncWorkerRunning) startWorker();
+  else if (gmailConnected() && !persisted?.running && Array.isArray(state?.queue) && state.queue.length > 0) startWorker();
+
+  return NextResponse.json(statusPayload());
 }
 
 export async function DELETE(req: NextRequest) {
   if (!isLocalRequest(req)) return NextResponse.json({ error: "Gmail disconnect is available only from the local app." }, { status: 403 });
   disconnectGmail();
+  syncWorkerRunning = false;
   deleteSetting("gmailSyncState");
   deleteSetting("gmailSyncWorker");
   deleteSetting("gmailSyncError");
