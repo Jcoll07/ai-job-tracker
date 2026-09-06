@@ -16,6 +16,7 @@ fi
 command -v xcrun >/dev/null 2>&1 || { printf '%s\n' "Xcode command-line tools are required (xcrun not found)." >&2; exit 1; }
 [ -x "$(command -v xcodebuild 2>/dev/null || true)" ] || { printf '%s\n' "Xcode is required (xcodebuild not found). Install/open Xcode once and accept its license." >&2; exit 1; }
 command -v plutil >/dev/null 2>&1 || { printf '%s\n' "macOS plutil is required." >&2; exit 1; }
+command -v codesign >/dev/null 2>&1 || { printf '%s\n' "macOS codesign is required." >&2; exit 1; }
 cd "$ROOT_DIR"
 npm run build:safari --workspace=apps/extension
 [ -d "$OUTPUT_DIR" ] || { printf '%s\n' "Safari build output not found: $OUTPUT_DIR" >&2; exit 1; }
@@ -58,17 +59,19 @@ PROJECT=$(find "$PROJECT_DIR" -type d -name '*.xcodeproj' -print -quit)
 }
 xcodebuild -list -project "$PROJECT" >/dev/null
 
-# A Safari web extension becomes available to Safari when its containing macOS
-# app is built and launched. Do that automatically so updating JobTrackr does
-# not require opening Xcode and pressing Run every time. The generated local
-# development project is built without requiring a developer certificate.
+# Build the containing app. New Xcode releases can reject the generated local
+# project during ValidateEmbeddedBinary because the generated targets start
+# unsigned. The build has nevertheless produced the complete .app/.appex by
+# that point. We repair that local-development bundle with an ad-hoc signature
+# below, then verify it recursively before installing it.
 SCHEME=$(xcodebuild -list -json -project "$PROJECT" | plutil -extract project.schemes.0 raw -o - - 2>/dev/null || true)
 [ -n "$SCHEME" ] || { printf '%s\n' "No Xcode scheme was found for the generated Safari project." >&2; exit 1; }
 rm -rf "$DERIVED_DIR"
+BUILD_STATUS=0
 xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Debug \
   -derivedDataPath "$DERIVED_DIR" \
   CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
-  build >/dev/null
+  build >/dev/null 2>&1 || BUILD_STATUS=$?
 
 CONTAINER_SOURCE=""
 for app in "$DERIVED_DIR"/Build/Products/Debug/*.app; do
@@ -79,14 +82,22 @@ for app in "$DERIVED_DIR"/Build/Products/Debug/*.app; do
   fi
 done
 [ -n "$CONTAINER_SOURCE" ] || {
-  printf '%s\n' "Xcode build completed but no macOS containing app with a Safari .appex was produced." >&2
-  find "$DERIVED_DIR/Build/Products/Debug" -maxdepth 3 -print >&2
+  printf '%s\n' "Xcode did not produce a containing app with an embedded Safari .appex (build status $BUILD_STATUS)." >&2
   exit 1
 }
 
-# CI must validate the generated project and embedded .appex, but must not
-# attempt to register a GUI application in the runner. On a user's Mac we
-# install and launch the containing app so Safari receives the extension.
+if [ "$BUILD_STATUS" -ne 0 ]; then
+  printf '%s\n' "Xcode reported ValidateEmbeddedBinary status $BUILD_STATUS; repairing the generated local-development bundle with an ad-hoc signature."
+fi
+codesign --force --deep --sign - "$CONTAINER_SOURCE" >/dev/null
+codesign --verify --deep --strict "$CONTAINER_SOURCE" >/dev/null 2>&1 || {
+  printf '%s\n' "The generated Safari containing app failed recursive code-signature verification." >&2
+  exit 1
+}
+
+# CI validates the generated project, embedded .appex, and final code signature
+# without trying to register a GUI application. On a user's Mac we install and
+# launch the containing app so Safari receives the extension automatically.
 if [ "${CI:-}" != "true" ]; then
   mkdir -p "$INSTALL_DIR"
   rm -rf "$CONTAINER_APP"
@@ -95,10 +106,11 @@ if [ "${CI:-}" != "true" ]; then
 
   APPEX=$(find "$CONTAINER_APP/Contents/PlugIns" -maxdepth 2 -name '*.appex' -print -quit 2>/dev/null || true)
   [ -n "$APPEX" ] || { printf '%s\n' "Installed Safari containing app has no embedded extension." >&2; exit 1; }
+  codesign --verify --deep --strict "$CONTAINER_APP" >/dev/null 2>&1 || { printf '%s\n' "Installed Safari containing app failed code-signature verification." >&2; exit 1; }
 
-  printf '\nSafari extension packaged, installed and launched:\n%s\n' "$CONTAINER_APP"
+  printf '\nSafari extension packaged, ad-hoc signed, installed and launched:\n%s\n' "$CONTAINER_APP"
   printf 'Embedded extension: %s\n' "$APPEX"
-  printf '%s\n' "If Safari has not previously been configured for unsigned development extensions, enable Develop → Allow Unsigned Extensions once. After that, this command installs the updated extension automatically on every rebuild."
+  printf '%s\n' "If Safari has not previously been configured for unsigned development extensions, enable Safari Settings → Developer → Allow unsigned extensions once per Safari launch."
 else
   printf '\nSafari Xcode project and containing app validated in CI:\n%s\n' "$CONTAINER_SOURCE"
 fi
