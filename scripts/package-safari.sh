@@ -22,7 +22,9 @@ if [ "${CI:-}" != "true" ]; then
   open "$CONTAINER_APP"
   if command -v pluginkit >/dev/null 2>&1; then
     REGISTERED=0; for _ in 1 2 3 4 5 6 7 8 9 10; do if pluginkit -mAvvv -p com.apple.Safari.web-extension 2>/dev/null | grep -Fq "$EXT_BUNDLE_ID"; then REGISTERED=1; break; fi; sleep 1; done
-    if [ "$REGISTERED" -ne 1 ]; then printf '%s\n' "Safari did not register the extension. If no Apple Development signing identity was found, enable Safari → Settings → Advanced → Show Develop menu, then Develop → Allow Unsigned Extensions, and rerun this same update command." >&2; exit 2; fi
+    if [ "$REGISTERED" -ne 1 ]; then
+      printf '%s\n' "WARNING: Safari has not registered the extension yet. The JobTrackr web app will still be installed and launched. If this Mac has no Apple Development signing identity, enable Safari → Settings → Advanced → Show Develop menu → Develop → Allow Unsigned Extensions, then rerun this update command to activate the extension." >&2
+    fi
   fi
-  printf '\nJobTrackr Safari extension built, signed, installed and registered with Safari.\nApp: %s\nExtension: %s\n' "$CONTAINER_APP" "$EXT_BUNDLE_ID"
+  printf '\nJobTrackr Safari extension built and installed.\nApp: %s\nExtension: %s\n' "$CONTAINER_APP" "$EXT_BUNDLE_ID"
 else printf '\nSafari Xcode project and containing app validated in CI:\n%s\n' "$CONTAINER_SOURCE"; fi
