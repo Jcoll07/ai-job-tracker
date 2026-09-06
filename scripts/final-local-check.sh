@@ -29,14 +29,25 @@ printf '\n=== Gmail status ===\n'
 STATUS_JSON=$(curl -fsS "$BASE_URL/api/gmail/status")
 printf '%s\n' "$STATUS_JSON"
 printf '\n=== Gmail label sync ===\n'
-SYNC_JSON=$(curl -fsS -X POST "$BASE_URL/api/gmail/sync")
+curl -fsS -X POST "$BASE_URL/api/gmail/sync" >/tmp/jobtrackr-sync-start.json
+printf '%s\n' "$(cat /tmp/jobtrackr-sync-start.json)"
+i=0
+SYNC_JSON=""
+while [ "$i" -lt 240 ]; do
+  SYNC_JSON=$(curl -fsS "$BASE_URL/api/gmail/sync")
+  DONE=$(node -e 'const x=JSON.parse(process.argv[1]); process.stdout.write(x.syncing?"0":"1")' "$SYNC_JSON")
+  [ "$DONE" = "1" ] && break
+  sleep 1
+  i=$((i+1))
+done
+[ "$DONE" = "1" ] || { printf '%s\n' "Gmail sync did not finish within 240 seconds."; printf '%s\n' "$SYNC_JSON"; cat "$LOG_FILE"; exit 1; }
 printf '%s\n' "$SYNC_JSON"
 node -e '
 const status=JSON.parse(process.argv[1]);
 const x=JSON.parse(process.argv[2]);
 if(x.error) throw new Error(x.error);
 const r=x.result;
-if(!r || typeof r.scanned!=="number") throw new Error("Gmail sync returned no result");
+if(!r || typeof r.scanned!=="number") throw new Error("Gmail sync returned no completed result");
 if(r.scanned < 1) throw new Error("Gmail sync scanned 0 messages (label/query did not find mail)");
 if(Array.isArray(r.errors) && r.errors.length) throw new Error(`Gmail sync returned ${r.errors.length} error(s): ${r.errors.join(" | ")}`);
 const successful=status.lastSuccessfulSync;
