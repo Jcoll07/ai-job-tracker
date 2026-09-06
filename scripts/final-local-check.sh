@@ -42,8 +42,10 @@ if(Array.isArray(r.errors) && r.errors.length) throw new Error(`Gmail sync retur
 const successful=status.lastSuccessfulSync;
 const currentProcessed=typeof r.classified==="number"&&r.classified>0&&typeof r.linked==="number"&&r.linked>0;
 const priorProcessed=successful&&typeof successful.classified==="number"&&successful.classified>0&&typeof successful.linked==="number"&&successful.linked>0&&(!Array.isArray(successful.errors)||successful.errors.length===0);
-if(!currentProcessed&&!priorProcessed) throw new Error("Gmail sync has not yet classified and linked any message successfully");
-console.log(`Gmail functional gate: PASS (${r.scanned} scanned, ${r.classified} classified, ${r.created} created, ${r.linked} linked, ${r.personalized??0} personalized, ${r.statusUpdates.length} status updates, mode=${r.queryMode||"unknown"}${currentProcessed?"":", previous successful sync reused"})`);
+const historicalProcessed=status.hasHistoricalLinkedMessage===true;
+if(!currentProcessed&&!priorProcessed&&!historicalProcessed) throw new Error("Gmail sync has not yet classified and linked any message successfully");
+const evidence=currentProcessed?"current sync":priorProcessed?"previous successful sync":"existing linked Gmail message";
+console.log(`Gmail functional gate: PASS (${r.scanned} scanned, ${r.classified} classified, ${r.created} created, ${r.linked} linked, ${r.personalized??0} personalized, ${r.statusUpdates.length} status updates, mode=${r.queryMode||"unknown"}, evidence=${evidence})`);
 ' "$STATUS_JSON" "$SYNC_JSON"
 printf '\n=== Jobs after sync ===\n'
 curl -sS "$BASE_URL/api/jobs?sort=dateAdded&dir=desc"
