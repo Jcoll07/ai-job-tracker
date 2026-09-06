@@ -17,7 +17,27 @@ npm run build:safari --workspace=apps/extension
 [ -d "$OUTPUT_DIR" ] || { printf '%s\n' "Safari build output not found: $OUTPUT_DIR" >&2; exit 1; }
 rm -rf "$PROJECT_DIR"
 mkdir -p "$PROJECT_DIR"
-xcrun safari-web-extension-packager "$OUTPUT_DIR" --project-location "$PROJECT_DIR" --macos-only --copy-resources --no-open --force
+
+# Apple renamed the command-line tool from safari-web-extension-converter to
+# safari-web-extension-packager. Prefer the current name but retain the older
+# name because it is still shipped by some Xcode versions (including hosted CI).
+if xcrun --find safari-web-extension-packager >/dev/null 2>&1; then
+  PACKAGER="safari-web-extension-packager"
+elif xcrun --find safari-web-extension-converter >/dev/null 2>&1; then
+  PACKAGER="safari-web-extension-converter"
+else
+  printf '%s\n' "Neither safari-web-extension-packager nor safari-web-extension-converter is available in the selected Xcode toolchain." >&2
+  exit 1
+fi
+
+xcrun "$PACKAGER" "$OUTPUT_DIR" \
+  --project-location "$PROJECT_DIR" \
+  --macos-only \
+  --copy-resources \
+  --no-open \
+  --no-prompt \
+  --force
+
 PROJECT=$(find "$PROJECT_DIR" -maxdepth 1 -name '*.xcodeproj' -print -quit)
 [ -n "$PROJECT" ] || { printf '%s\n' "Safari Xcode project was not generated." >&2; exit 1; }
 xcodebuild -list -project "$PROJECT" >/dev/null
