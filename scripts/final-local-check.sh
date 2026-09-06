@@ -42,8 +42,8 @@ printf '\n\n=== Gmail label sync ===\n'
 SYNC_JSON=$(curl -fsS -X POST "$BASE_URL/api/gmail/sync")
 printf '%s\n' "$SYNC_JSON"
 
-# This is the product-level gate: Gmail must be connected, the configured label
-# must be readable, messages must be scanned, and no per-message errors may occur.
+# Product-level gate: Gmail must be connected, the configured label must be
+# readable, messages must be scanned, and no per-message errors may occur.
 node -e '
 const x=JSON.parse(process.argv[1]);
 if(x.error) throw new Error(x.error);
@@ -51,7 +51,9 @@ const r=x.result;
 if(!r || typeof r.scanned!=="number") throw new Error("Gmail sync returned no result");
 if(r.scanned < 1) throw new Error(`Gmail sync scanned 0 messages (label/query did not find mail)`);
 if(Array.isArray(r.errors) && r.errors.length) throw new Error(`Gmail sync returned ${r.errors.length} error(s): ${r.errors.join(" | ")}`);
-console.log(`Gmail functional gate: PASS (${r.scanned} scanned, ${r.classified} classified, ${r.created} created, ${r.linked} linked, ${r.statusUpdates.length} status updates, mode=${r.queryMode||"unknown"})`);
+if(typeof r.classified!=="number" || r.classified < 1) throw new Error("Gmail sync classified 0 messages");
+if(typeof r.linked!=="number" || r.linked < 1) throw new Error("Gmail sync linked 0 messages to jobs");
+console.log(`Gmail functional gate: PASS (${r.scanned} scanned, ${r.classified} classified, ${r.created} created, ${r.linked} linked, ${r.personalized??0} personalized, ${r.statusUpdates.length} status updates, mode=${r.queryMode||"unknown"})`);
 ' "$SYNC_JSON"
 
 printf '\n=== Jobs after sync ===\n'
