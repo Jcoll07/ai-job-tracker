@@ -60,15 +60,14 @@ xcodebuild -list -project "$PROJECT" >/dev/null
 
 # A Safari web extension becomes available to Safari when its containing macOS
 # app is built and launched. Do that automatically so updating JobTrackr does
-# not require opening Xcode and pressing Run every time. Apple explicitly
-# supports unsigned macOS extensions for local development when Safari's
-# unsigned-extension development setting is enabled.
+# not require opening Xcode and pressing Run every time. Apple calls the '-'
+# identity "Sign to Run Locally"; this is the local-development signing mode.
 SCHEME=$(xcodebuild -list -json -project "$PROJECT" | plutil -extract project.schemes.0 raw -o - - 2>/dev/null || true)
 [ -n "$SCHEME" ] || { printf '%s\n' "No Xcode scheme was found for the generated Safari project." >&2; exit 1; }
 rm -rf "$DERIVED_DIR"
 xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Debug \
   -derivedDataPath "$DERIVED_DIR" \
-  CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+  CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=YES CODE_SIGNING_ALLOWED=YES \
   build >/dev/null
 
 CONTAINER_SOURCE=""
