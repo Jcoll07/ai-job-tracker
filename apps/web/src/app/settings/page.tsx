@@ -3,38 +3,34 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/client";
 
+interface Task { label:string; description:string; defaultKind:string }
+interface Model { id:string; owned_by?:string; object?:string }
+interface ModelSettings { models:Record<string,string>; fallbackNotice?:{task:string;missingModel:string;selectedModel:string;at:string}|null }
 interface Settings { aiConfigured:boolean; gmailConfigured:boolean; gmailConnected:boolean; extensionToken:string; appUrl:string; syncIntervalMinutes:number }
 
 function SettingsInner(){
   const [settings,setSettings]=useState<Settings|null>(null);
+  const [models,setModels]=useState<Model[]>([]);
+  const [tasks,setTasks]=useState<Record<string,Task>>({});
+  const [modelSettings,setModelSettings]=useState<ModelSettings>({models:{},fallbackNotice:null});
+  const [modelError,setModelError]=useState<string|null>(null);
+  const [loadingModels,setLoadingModels]=useState(false);
   const [loadError,setLoadError]=useState<string|null>(null);
   const [notice,setNotice]=useState<{kind:"ok"|"err";text:string}|null>(null);
   const [interval,setIntervalMin]=useState("");
+  const [gmailSyncing,setGmailSyncing]=useState(false);
+  const [gmailLastSync,setGmailLastSync]=useState<any>(null);
   const fileRef=useRef<HTMLInputElement>(null);
 
-  const load=useCallback(async()=>{
-    setLoadError(null);
-    const controller=new AbortController();
-    const timeout=window.setTimeout(()=>controller.abort(),8000);
-    try{
-      const s=await api<Settings>("/api/settings",{signal:controller.signal});
-      setSettings(s);
-      setIntervalMin(String(s.syncIntervalMinutes));
-    }catch(error){
-      setLoadError(error instanceof DOMException&&error.name==="AbortError"?"The settings request timed out. Check that the local JobTrackr server is running.":error instanceof Error?error.message:"Unable to load settings.");
-    }finally{
-      window.clearTimeout(timeout);
-    }
-  },[]);
+  const load=useCallback(async()=>{setLoadError(null);const controller=new AbortController();const timeout=window.setTimeout(()=>controller.abort(),8000);try{const s=await api<Settings>("/api/settings",{signal:controller.signal});setSettings(s);setIntervalMin(String(s.syncIntervalMinutes));}catch(error){setLoadError(error instanceof DOMException&&error.name==="AbortError"?"The settings request timed out. Check that the local JobTrackr server is running.":error instanceof Error?error.message:"Unable to load settings.");}finally{window.clearTimeout(timeout);}},[]);
+  const loadModels=useCallback(async()=>{setLoadingModels(true);setModelError(null);try{const d=await api<{models:Model[];tasks:Record<string,Task>;settings:ModelSettings;error?:string}>("/api/ai/models");setModels(d.models);setTasks(d.tasks);setModelSettings(d.settings);if(d.error)setModelError(d.error);}catch(e){setModelError(e instanceof Error?e.message:"Unable to discover local models");}finally{setLoadingModels(false);}},[]);
+  const loadGmailStatus=useCallback(async()=>{try{const d=await api<{lastSync:any}>("/api/gmail/status");setGmailLastSync(d.lastSync);}catch{/* status is supplementary */}},[]);
 
-  useEffect(()=>{
-    void load();
-    const gmailResult=new URLSearchParams(window.location.search).get("gmail");
-    if(gmailResult==="connected")setNotice({kind:"ok",text:"Gmail connected!"});
-    if(gmailResult==="error"||gmailResult==="denied")setNotice({kind:"err",text:"Gmail connection failed — check OAuth settings."});
-  },[load]);
+  useEffect(()=>{void load();void loadModels();void loadGmailStatus();const gmailResult=new URLSearchParams(window.location.search).get("gmail");if(gmailResult==="connected")setNotice({kind:"ok",text:"Gmail connected!"});if(gmailResult==="error"||gmailResult==="denied")setNotice({kind:"err",text:"Gmail connection failed — check OAuth settings."});},[load,loadModels,loadGmailStatus]);
 
+  async function chooseModel(task:string,model:string){try{const d=await api<{settings:ModelSettings}>("/api/ai/models",{method:"POST",json:{task,model}});setModelSettings(d.settings);setNotice({kind:"ok",text:`${tasks[task]?.label||task} now uses ${model}.`});}catch(e){setNotice({kind:"err",text:e instanceof Error?e.message:"Unable to save model selection"});}}
   async function disconnectGmail(){await api("/api/gmail/sync",{method:"DELETE"});setNotice({kind:"ok",text:"Gmail disconnected."});await load();}
+  async function syncGmail(){setGmailSyncing(true);setNotice(null);try{const d=await api<{result:{scanned:number;classified:number;linked:number;errors:string[]}}>("/api/gmail/sync",{method:"POST"});setNotice({kind:d.result.errors.length?"err":"ok",text:`Gmail: ${d.result.scanned} scanned, ${d.result.classified} classified, ${d.result.linked} linked${d.result.errors.length?`, ${d.result.errors.length} error(s)`:""}.`});await loadGmailStatus();}catch(e){setNotice({kind:"err",text:e instanceof Error?e.message:"Gmail sync failed"});}finally{setGmailSyncing(false);}}
   async function saveSyncInterval(){const m=Number(interval);if(!Number.isFinite(m))return;const r=await api<{syncIntervalMinutes:number}>("/api/settings",{method:"POST",json:{action:"setSyncInterval",minutes:m}});setIntervalMin(String(r.syncIntervalMinutes));setNotice({kind:"ok",text:`Auto-sync interval set to ${r.syncIntervalMinutes} minutes.`});}
   async function regenerateToken(){if(!confirm("Regenerate? The extension will need the new token."))return;await api("/api/settings",{method:"POST",json:{action:"regenerateExtensionToken"}});await load();}
   async function importBackup(file:File){try{const text=await file.text();const d=await api<{imported:number;skipped:number}>("/api/import",{method:"POST",body:text,headers:{"content-type":"application/json"}});setNotice({kind:"ok",text:`Imported ${d.imported} job(s), skipped ${d.skipped}.`});}catch(e){setNotice({kind:"err",text:e instanceof Error?e.message:"Import failed"});}}
@@ -43,11 +39,10 @@ function SettingsInner(){
   if(!settings)return <p className="muted">Loading…</p>;
   const check=(ok:boolean)=>ok?"✓":"⚠";
   return <div><h1>Settings</h1>{notice&&<div className={`notice ${notice.kind}`}>{notice.text}</div>}
-    <div className="card"><h2 style={{marginTop:0}}>{check(settings.aiConfigured)} Local AI</h2><p className="muted">The default provider is a local OpenAI-compatible oMLX server. Set <code className="kbd">AI_BASE_URL</code>, <code className="kbd">AI_MODEL</code> and <code className="kbd">AI_API_KEY</code> in <code className="kbd">apps/web/.env.local</code>. No job or email content is sent to a cloud model when <code className="kbd">AI_PROVIDER=local</code>.</p><p className="muted">Recommended configuration for your oMLX server: <code className="kbd">http://127.0.0.1:8000/v1</code> with model <code className="kbd">Qwen2.5.1-Coder-7B-Instruct-4bit</code>. The API key is sent server-side only and is never exposed to the browser. Anthropic remains available as an explicit fallback via <code className="kbd">AI_PROVIDER=anthropic</code>.</p></div>
-    <div className="card"><h2 style={{marginTop:0}}>{check(settings.gmailConnected)} Gmail Monitoring</h2>{!settings.gmailConfigured?<p>Set <code className="kbd">GOOGLE_CLIENT_ID</code> and <code className="kbd">GOOGLE_CLIENT_SECRET</code> in <code className="kbd">apps/web/.env.local</code>. Use the read-only <code className="kbd">gmail.readonly</code> scope.</p>:settings.gmailConnected?<><div className="row"><span className="muted">Connected. Sync manually or through the scheduler.</span><div className="spacer"/><button className="btn danger" onClick={disconnectGmail}>Disconnect</button></div><div className="row" style={{marginTop:10}}><div className="field"><label>Auto-sync interval (minutes, 5–720)</label><input type="number" min={5} max={720} value={interval} onChange={e=>setIntervalMin(e.target.value)} style={{width:120}}/></div><button className="btn" onClick={saveSyncInterval} style={{alignSelf:"end"}}>Save</button></div></>:<a className="btn primary" href="/api/gmail/auth">Connect Gmail</a>}</div>
+    <div className="card"><h2 style={{marginTop:0}}>{check(settings.aiConfigured)} Local AI</h2><p className="muted">JobTrackr uses your local OpenAI-compatible server. The browser never receives the local API key.</p><div className="row"><span className="muted">Endpoint</span><code className="kbd">{process.env.NEXT_PUBLIC_AI_BASE_URL||"http://127.0.0.1:8000/v1"}</code><div className="spacer"/><button className="btn" onClick={()=>void loadModels()} disabled={loadingModels}>{loadingModels?"Detecting…":"Refresh models"}</button></div>{modelError&&<div className="notice err" style={{marginTop:10}}>Unable to query local models: {modelError}<br/><span className="muted">Start your local OpenAI-compatible server and refresh.</span></div>}{models.length>0&&<p className="muted">Detected {models.length} model(s) from the server. New models appear automatically after Refresh models.</p>}{modelSettings.fallbackNotice&&<div className="notice err">The configured model <strong>{modelSettings.fallbackNotice.missingModel}</strong> is no longer available. JobTrackr automatically selected <strong>{modelSettings.fallbackNotice.selectedModel}</strong> for {tasks[modelSettings.fallbackNotice.task]?.label||modelSettings.fallbackNotice.task}. You can change it below.</div>}<div style={{display:"grid",gap:12,marginTop:14}}>{Object.entries(tasks).map(([key,task])=><div key={key} className="row" style={{alignItems:"center"}}><div style={{minWidth:260}}><strong>{task.label}</strong><div className="muted">{task.description}</div></div><div className="spacer"/><select value={modelSettings.models[key]||""} disabled={!models.length} onChange={e=>void chooseModel(key,e.target.value)} style={{minWidth:330}}><option value="" disabled>Select a model</option>{models.map(m=><option key={m.id} value={m.id}>{m.id}</option>)}</select></div>)}</div>{models.length===0&&!modelError&&<p className="muted" style={{marginBottom:0}}>No models were returned by the local server.</p>}</div>
+    <div className="card"><h2 style={{marginTop:0}}>{check(settings.gmailConnected)} Gmail Monitoring</h2>{!settings.gmailConfigured?<><p>Gmail OAuth is not configured yet.</p><p className="muted">Set <code className="kbd">GOOGLE_CLIENT_ID</code> and <code className="kbd">GOOGLE_CLIENT_SECRET</code> in <code className="kbd">apps/web/.env.local</code>. Google OAuth must use the read-only <code className="kbd">gmail.readonly</code> scope and callback <code className="kbd">http://localhost:3001/api/gmail/callback</code>.</p></>:settings.gmailConnected?<><div className="row"><span className="muted">Connected. Gmail is read-only.</span><div className="spacer"/><button className="btn" onClick={syncGmail} disabled={gmailSyncing}>{gmailSyncing?"Syncing…":"Sync Gmail now"}</button><button className="btn danger" onClick={disconnectGmail}>Disconnect</button></div><div className="row" style={{marginTop:10}}><div className="field"><label>Auto-sync interval (minutes, 5–720)</label><input type="number" min={5} max={720} value={interval} onChange={e=>setIntervalMin(e.target.value)} style={{width:120}}/></div><button className="btn" onClick={saveSyncInterval} style={{alignSelf:"end"}}>Save</button></div>{gmailLastSync&&<p className="muted" style={{marginBottom:0}}>Last sync: {new Date(gmailLastSync.at).toLocaleString()} — {gmailLastSync.scanned} scanned, {gmailLastSync.classified} classified, {gmailLastSync.linked} linked.</p>}</>:<><p className="muted">Gmail credentials are configured, but the account is not connected.</p><a className="btn primary" href="/api/gmail/auth">Connect Gmail</a></>}</div>
     <div className="card"><h2 style={{marginTop:0}}>Safari Extension</h2><ol className="muted" style={{paddingLeft:18,marginTop:0}}><li>Run <code className="kbd">npm run build:safari --workspace=apps/extension</code>.</li><li>From <code className="kbd">apps/extension</code>, package with <code className="kbd">xcrun safari-web-extension-packager .output/safari-mv2</code>.</li><li>Open the generated Xcode project, build/run the macOS Safari Web Extension target, then enable it in Safari Settings → Extensions.</li><li>Set the extension server URL to <code className="kbd">{settings.appUrl}</code> and paste the token below.</li></ol><div className="form-grid"><div className="field"><label>Server URL</label><input readOnly value={settings.appUrl}/></div><div className="field"><label>Extension Token</label><input readOnly className="mono" value={settings.extensionToken}/></div></div><div className="row" style={{marginTop:10}}><button className="btn" onClick={regenerateToken}>Regenerate Token</button><a className="btn" href="/cv">Open CV Manager</a></div></div>
     <div className="card"><h2 style={{marginTop:0}}>Data</h2><div className="row"><a className="btn" href="/api/export">Export Backup (JSON)</a><button className="btn" onClick={()=>fileRef.current?.click()}>Import Backup (v1/v2 JSON)</button><input ref={fileRef} type="file" accept=".json" style={{display:"none"}} onChange={e=>{const f=e.target.files?.[0];if(f)void importBackup(f);e.target.value="";}}/></div><p className="muted" style={{marginBottom:0}}>SQLite and CV files remain under the local <code className="kbd">data/</code> directory and are gitignored.</p></div>
   </div>;
 }
-
 export default function SettingsPage(){return <SettingsInner/>;}
