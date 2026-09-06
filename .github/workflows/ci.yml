@@ -6,7 +6,9 @@ on:
     branches: [main]
 jobs:
   validate:
-    runs-on: macos-14
+    # macOS 14 is deprecated in GitHub Actions; macOS 26 is the current
+    # stable hosted ARM64 image and is the closest CI target to modern macOS.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
