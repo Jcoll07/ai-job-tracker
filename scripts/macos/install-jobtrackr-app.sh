@@ -5,6 +5,7 @@ APP_NAME="JobTrackr.app"
 INSTALL_DIR="${HOME}/Applications"
 APP_DIR="${INSTALL_DIR}/${APP_NAME}"
 TMP_SCRIPT="${TMPDIR:-/tmp}/jobtrackr-launcher-$$.applescript"
+APP_PORT="3001"
 
 if ! command -v osacompile >/dev/null 2>&1; then echo "Error: osacompile no está disponible. Ejecuta este instalador en macOS."; exit 1; fi
 cd "$ROOT_DIR"
@@ -33,6 +34,28 @@ run_npm install
 if ! "$NODE_BIN" -e "require('better-sqlite3');" >/dev/null 2>&1; then run_npm rebuild better-sqlite3 --build-from-source; fi
 "$NODE_BIN" -e "require('better-sqlite3');"
 
+# Never leave an older Next.js process serving an older build on port 3001.
+# This is deliberately port-based as well as PID-file-based: an old launcher,
+# manual `next start`, or a crashed/stale PID file must not mask a new build.
+if command -v lsof >/dev/null 2>&1; then
+  OLD_PIDS="$(lsof -tiTCP:${APP_PORT} -sTCP:LISTEN 2>/dev/null || true)"
+  if [ -n "$OLD_PIDS" ]; then
+    echo "Stopping existing JobTrackr server(s) on port ${APP_PORT}..."
+    kill $OLD_PIDS 2>/dev/null || true
+    for _ in $(seq 1 20); do
+      sleep 0.25
+      REMAINING="$(lsof -tiTCP:${APP_PORT} -sTCP:LISTEN 2>/dev/null || true)"
+      [ -z "$REMAINING" ] && break
+      kill $REMAINING 2>/dev/null || true
+    done
+    REMAINING="$(lsof -tiTCP:${APP_PORT} -sTCP:LISTEN 2>/dev/null || true)"
+    if [ -n "$REMAINING" ]; then
+      echo "Error: no se pudo liberar el puerto ${APP_PORT}."; exit 1
+    fi
+  fi
+fi
+rm -f "${ROOT_DIR}/.jobtrackr-server.pid"
+
 BUILT_COMMIT="$(cat "${ROOT_DIR}/.jobtrackr-build-commit" 2>/dev/null || true)"
 if [ ! -f "${ROOT_DIR}/apps/web/.next/BUILD_ID" ] || [ "$CURRENT_COMMIT" != "$BUILT_COMMIT" ]; then
   echo "Building JobTrackr for commit $CURRENT_COMMIT..."
@@ -53,6 +76,8 @@ osacompile -o "$APP_DIR" "$TMP_SCRIPT" >/dev/null
 rm -f "$TMP_SCRIPT"
 /usr/bin/touch "$APP_DIR/Contents/Resources/.jobtrackr-local"
 printf '%s' "$CURRENT_COMMIT" > "${ROOT_DIR}/.jobtrackr-build-commit"
-open -R "$APP_DIR"
+open "$APP_DIR"
+# The containing app's launcher starts the freshly built server and opens Safari.
 echo "JobTrackr actualizado e instalado en: $APP_DIR"
+echo "Build activo: $CURRENT_COMMIT"
 echo "La extensión Safari se ha regenerado, instalado y lanzado automáticamente."
