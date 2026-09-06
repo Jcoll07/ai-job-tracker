@@ -9,9 +9,9 @@ if xcrun --find safari-web-extension-packager >/dev/null 2>&1; then PACKAGER="sa
 xcrun "$PACKAGER" "$OUTPUT_DIR" --project-location "$PROJECT_DIR" --app-name "JobTrackr Safari Extension" --bundle-identifier "com.jcoll07.jobtrackr.safariextension" --macos-only --copy-resources --no-open --no-prompt --force
 PROJECT=$(find "$PROJECT_DIR" -type d -name '*.xcodeproj' -print -quit); [ -n "$PROJECT" ] || { printf '%s\n' "Safari Xcode project was not generated." >&2; exit 1; }; xcodebuild -list -project "$PROJECT" >/dev/null
 SCHEME=$(xcodebuild -list -json -project "$PROJECT" | plutil -extract project.schemes.0 raw -o - - 2>/dev/null || true); [ -n "$SCHEME" ] || { printf '%s\n' "No Xcode scheme was found for the generated Safari project." >&2; exit 1; }
-rm -rf "$DERIVED_DIR"; BUILD_STATUS=0; xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Debug -derivedDataPath "$DERIVED_DIR" CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build >/dev/null 2>&1 || BUILD_STATUS=$?
+rm -rf "$DERIVED_DIR"; BUILD_STATUS=0; xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Debug -derivedDataPath "$DERIVED_DIR" CODE_SIGN_IDENTITY="-" DEVELOPMENT_TEAM="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build >/dev/null 2>&1 || BUILD_STATUS=$?
 CONTAINER_SOURCE=""; for app in "$DERIVED_DIR"/Build/Products/Debug/*.app; do [ -d "$app" ] || continue; if find "$app/Contents/PlugIns" -maxdepth 2 -name '*.appex' -print -quit 2>/dev/null | grep -q .; then CONTAINER_SOURCE="$app"; break; fi; done
-[ -n "$CONTAINER_SOURCE" ] || { printf '%s\n' "Xcode did not produce a containing app with an embedded Safari .appex (build status $BUILD_STATUS)." >&2; exit 1; }; if [ "$BUILD_STATUS" -ne 0 ]; then printf '%s\n' "Xcode reported status $BUILD_STATUS after producing the complete local bundle; applying the local signature."; fi
+[ -n "$CONTAINER_SOURCE" ] || { printf '%s\n' "Xcode did not produce a containing app with an embedded Safari .appex (build status $BUILD_STATUS)." >&2; exit 1; }; if [ "$BUILD_STATUS" -ne 0 ]; then printf '%s\n' "Xcode reported status $BUILD_STATUS after producing the complete local bundle; applying the local development signature."; fi
 SIGN_IDENTITY="-"; if command -v security >/dev/null 2>&1; then DEV_ID=$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(Apple Development: .*\)"/\1/p' | head -n 1 || true); [ -n "$DEV_ID" ] && SIGN_IDENTITY="$DEV_ID"; fi
 codesign --force --deep --sign "$SIGN_IDENTITY" "$CONTAINER_SOURCE" >/dev/null; codesign --verify --deep --strict "$CONTAINER_SOURCE" >/dev/null 2>&1 || { printf '%s\n' "Generated Safari app failed code-signature verification." >&2; exit 1; }
 if [ "${CI:-}" != "true" ]; then
@@ -21,9 +21,10 @@ if [ "${CI:-}" != "true" ]; then
   EXT_BUNDLE_ID=$(plutil -extract CFBundleIdentifier raw -o - "$APPEX/Contents/Info.plist" 2>/dev/null || true); [ -n "$EXT_BUNDLE_ID" ] || { printf '%s\n' "Could not read the embedded Safari extension bundle identifier." >&2; exit 1; }
   open "$CONTAINER_APP"
   if command -v pluginkit >/dev/null 2>&1; then
-    REGISTERED=0; for _ in 1 2 3 4 5 6 7 8 9 10; do if pluginkit -mAvvv -p com.apple.Safari.web-extension 2>/dev/null | grep -Fq "$EXT_BUNDLE_ID"; then REGISTERED=1; break; fi; sleep 1; done
+    pluginkit -a "$APPEX" >/dev/null 2>&1 || true
+    REGISTERED=0; for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do if pluginkit -mAvvv -p com.apple.Safari.web-extension 2>/dev/null | grep -Fq "$EXT_BUNDLE_ID"; then REGISTERED=1; break; fi; sleep 1; done
     if [ "$REGISTERED" -ne 1 ]; then
-      printf '%s\n' "WARNING: Safari has not registered the extension yet. The JobTrackr web app will still be installed and launched. If this Mac has no Apple Development signing identity, enable Safari → Settings → Advanced → Show Develop menu → Develop → Allow Unsigned Extensions, then rerun this update command to activate the extension." >&2
+      printf '%s\n' "WARNING: Safari has not registered the extension yet. Safari requires an opened containing app and, for unsigned development builds, Allow Unsigned Extensions. The web app is still installed." >&2
     fi
   fi
   printf '\nJobTrackr Safari extension built and installed.\nApp: %s\nExtension: %s\n' "$CONTAINER_APP" "$EXT_BUNDLE_ID"
