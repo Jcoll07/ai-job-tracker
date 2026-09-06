@@ -26,23 +26,22 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PAT
 command -v node >/dev/null 2>&1 || { echo "Error: Node.js no está disponible."; exit 1; }
 command -v npm >/dev/null 2>&1 || { echo "Error: npm no está disponible."; exit 1; }
 
-# Node 26 uses ABI 147. better-sqlite3 11.x does not support Node 26;
-# use the 12.x line which ships Node 26 prebuilds.
-nodeMajor=$(node -p 'Number(process.versions.node.split(".")[0])')
+# Install the JS dependency tree without running the old native addon from the lockfile.
+# better-sqlite3 13.x uses N-API and ships platform binaries, avoiding Node ABI mismatches.
 if [ ! -d node_modules ] || [ ! -x node_modules/.bin/next ]; then
   echo "Instalando dependencias..."
   npm install --package-lock=false --save=false --ignore-scripts
 fi
 
 sqliteVersion=$(node -p 'try { require("better-sqlite3/package.json").version } catch { "missing" }')
-if [ "$nodeMajor" -ge 24 ] && [[ "$sqliteVersion" != 12.* ]]; then
-  echo "Node.js 24+ detectado: instalando better-sqlite3 12.11.1 compatible..."
-  npm install --package-lock=false --save=false better-sqlite3@12.11.1
+if [[ "$sqliteVersion" != 13.* ]]; then
+  echo "Preparando better-sqlite3 13.0.3 (N-API, compatible con Node 22+)..."
+  npm install --package-lock=false --save=false better-sqlite3@13.0.3
 fi
 
 if ! node -e 'require("better-sqlite3")' >/dev/null 2>&1; then
-  echo "Reinstalando better-sqlite3 12.11.1 para corregir el binario nativo..."
-  npm install --package-lock=false --save=false better-sqlite3@12.11.1
+  echo "Reinstalando better-sqlite3 13.0.3 para corregir el binario nativo..."
+  npm install --package-lock=false --save=false better-sqlite3@13.0.3
 fi
 node -e 'require("better-sqlite3")'
 
