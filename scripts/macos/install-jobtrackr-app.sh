@@ -33,8 +33,8 @@ if [ ! -d node_modules ] || [ ! -x node_modules/.bin/next ]; then
   npm ci
 fi
 if ! node -e "require('better-sqlite3');" >/dev/null 2>&1; then
-  echo "Recompilando better-sqlite3 para el Node.js activo..."
-  npm rebuild better-sqlite3
+  echo "Recompilando better-sqlite3 desde código fuente para el Node.js activo..."
+  npm rebuild better-sqlite3 --build-from-source
 fi
 node -e "require('better-sqlite3');"
 
@@ -43,6 +43,10 @@ if [ ! -f "${ROOT_DIR}/apps/web/.next/BUILD_ID" ]; then
   echo "Preparando la aplicación (build de producción)..."
   npm run build
 fi
+
+# Record the exact source revision represented by this local build.
+CURRENT_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+printf '%s' "$CURRENT_COMMIT" > "${ROOT_DIR}/.jobtrackr-build-commit"
 
 open -R "$APP_DIR"
 echo "JobTrackr instalado en: $APP_DIR"
