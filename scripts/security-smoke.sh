@@ -38,8 +38,8 @@ fi
 code=$(curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/api/extension/ping")
 [ "$code" = "401" ] && pass "extension endpoint rejects missing token" || fail "extension endpoint missing-token response -> $code"
 
-code=$(curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/api/gmail/sync")
-[ "$code" = "401" ] && pass "scheduled Gmail sync rejects missing cron secret" || fail "Gmail sync missing-secret response -> $code"
+code=$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: attacker.example' "$BASE_URL/api/gmail/sync")
+[ "$code" = "401" ] && pass "remote Gmail sync rejects missing cron secret" || fail "Gmail sync remote missing-secret response -> $code"
 
 code=$(curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/api/gmail/callback")
 [ "$code" = "400" ] && pass "Gmail OAuth callback rejects missing code/state with 400" || fail "Gmail callback missing params -> $code"
