@@ -10,6 +10,7 @@
     "build:safari": "npm run build:safari --workspace=apps/extension",
     "package:safari": "sh scripts/package-safari.sh",
     "package:macos": "sh scripts/macos/install-jobtrackr-app.sh",
+    "test:macos-launcher": "sh scripts/macos/test-launcher-template.sh",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test:e2e": "sh scripts/e2e-local.sh",
     "test:security": "sh scripts/security-smoke.sh",
