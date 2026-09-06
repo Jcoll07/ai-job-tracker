@@ -6,7 +6,7 @@ on:
     branches: [main]
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -20,4 +20,5 @@ jobs:
       - run: npm run build
       - run: npm run build:extension
       - run: npm run build:safari --workspace=apps/extension
+      - run: sh scripts/package-safari.sh
       - run: sh scripts/e2e-ci.sh
