@@ -23,14 +23,31 @@ rm -f "$TMP_SCRIPT"
 cd "$ROOT_DIR"
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 
+# Finder does not load the user's interactive shell, so command -v node can
+# resolve to a different installation than Terminal. Prefer the project's
+# supported Node 22 installation through nvm and reject incompatible Node
+# versions instead of compiling native modules with the wrong ABI.
+NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+if [ -s "$NVM_DIR/nvm.sh" ]; then
+  # shellcheck disable=SC1090
+  . "$NVM_DIR/nvm.sh"
+  nvm use 22.23.2 >/dev/null 2>&1 || true
+fi
+
 command -v node >/dev/null 2>&1 || { echo "Error: Node.js no está disponible."; exit 1; }
 command -v npm >/dev/null 2>&1 || { echo "Error: npm no está disponible."; exit 1; }
 
-# npm and node can point to different installations under Finder. Always run
-# npm through the exact node selected above so native modules and Next use the
-# same Node ABI.
 NODE_BIN="$(command -v node)"
 NPM_BIN="$(command -v npm)"
+NODE_MAJOR="$($NODE_BIN -p 'process.versions.node.split(".")[0]')"
+if [ "$NODE_MAJOR" != "22" ]; then
+  echo "Error: JobTrackr requiere Node.js 22.x para su módulo nativo better-sqlite3; se encontró $($NODE_BIN -p 'process.version')."
+  echo "Instala/activa Node 22.23.2 con nvm y vuelve a ejecutar este instalador."
+  exit 1
+fi
+
+# npm and node must always be the exact same installation so native modules
+# and Next use the same Node ABI.
 run_npm() { "$NODE_BIN" "$NPM_BIN" "$@"; }
 
 NODE_ABI="$($NODE_BIN -p 'process.versions.modules')"
