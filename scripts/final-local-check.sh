@@ -39,8 +39,22 @@ done
 printf '\n=== Gmail status ===\n'
 curl -sS "$BASE_URL/api/gmail/status"
 printf '\n\n=== Gmail label sync ===\n'
-curl -sS -X POST "$BASE_URL/api/gmail/sync"
-printf '\n\n=== Jobs after sync ===\n'
+SYNC_JSON=$(curl -fsS -X POST "$BASE_URL/api/gmail/sync")
+printf '%s\n' "$SYNC_JSON"
+
+# This is the product-level gate: Gmail must be connected, the configured label
+# must be readable, messages must be scanned, and no per-message errors may occur.
+node -e '
+const x=JSON.parse(process.argv[1]);
+if(x.error) throw new Error(x.error);
+const r=x.result;
+if(!r || typeof r.scanned!=="number") throw new Error("Gmail sync returned no result");
+if(r.scanned < 1) throw new Error(`Gmail sync scanned 0 messages (label/query did not find mail)`);
+if(Array.isArray(r.errors) && r.errors.length) throw new Error(`Gmail sync returned ${r.errors.length} error(s): ${r.errors.join(" | ")}`);
+console.log(`Gmail functional gate: PASS (${r.scanned} scanned, ${r.classified} classified, ${r.created} created, ${r.linked} linked, ${r.statusUpdates.length} status updates, mode=${r.queryMode||"unknown"})`);
+' "$SYNC_JSON"
+
+printf '\n=== Jobs after sync ===\n'
 curl -sS "$BASE_URL/api/jobs?sort=dateAdded&dir=desc"
 printf '\n\n=== Final check complete ===\n'
 printf 'Server log: %s\n' "$LOG_FILE"
