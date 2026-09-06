@@ -28,15 +28,11 @@ NODE_ABI="$($NODE_BIN -p 'process.versions.modules')"
 NODE_VERSION="$($NODE_BIN -p 'process.version')"
 echo "Using Node $NODE_VERSION (ABI $NODE_ABI)"
 
-# Keep dependencies in sync with the commit pulled above. npm install is used
-# instead of assuming node_modules matches package-lock.json.
 run_npm install
 if ! "$NODE_BIN" -e "require('better-sqlite3');" >/dev/null 2>&1; then run_npm rebuild better-sqlite3 --build-from-source; fi
 "$NODE_BIN" -e "require('better-sqlite3');"
 
 # Never leave an older Next.js process serving an older build on port 3001.
-# This is deliberately port-based as well as PID-file-based: an old launcher,
-# manual `next start`, or a crashed/stale PID file must not mask a new build.
 if command -v lsof >/dev/null 2>&1; then
   OLD_PIDS="$(lsof -tiTCP:${APP_PORT} -sTCP:LISTEN 2>/dev/null || true)"
   if [ -n "$OLD_PIDS" ]; then
@@ -62,9 +58,6 @@ if [ ! -f "${ROOT_DIR}/apps/web/.next/BUILD_ID" ] || [ "$CURRENT_COMMIT" != "$BU
   run_npm run build
 fi
 
-# Always regenerate and build the Safari containing app from the current
-# extension sources. The resulting app is installed and launched by the
-# packaging script, so no Xcode interaction is required after an update.
 if [ "$(uname -s)" = "Darwin" ] && command -v xcrun >/dev/null 2>&1; then
   run_npm run package:safari
 fi
@@ -77,7 +70,23 @@ rm -f "$TMP_SCRIPT"
 /usr/bin/touch "$APP_DIR/Contents/Resources/.jobtrackr-local"
 printf '%s' "$CURRENT_COMMIT" > "${ROOT_DIR}/.jobtrackr-build-commit"
 open "$APP_DIR"
-# The containing app's launcher starts the freshly built server and opens Safari.
+
+# Do not return success until the newly installed launcher has actually
+# started the production server. This makes a broken launcher visible during
+# the one-command update instead of leaving the user with a dead 127.0.0.1:3001.
+SERVER_READY=0
+for _ in $(seq 1 60); do
+  if /usr/bin/curl -fsS --max-time 2 "http://127.0.0.1:${APP_PORT}" >/dev/null 2>&1; then SERVER_READY=1; break; fi
+  sleep 0.5
+done
+if [ "$SERVER_READY" -ne 1 ]; then
+  echo "Error: JobTrackr.app se instaló pero no pudo iniciar el servidor en http://127.0.0.1:${APP_PORT}."
+  echo "Últimas líneas del log:"
+  /usr/bin/tail -n 40 "${ROOT_DIR}/.jobtrackr-server.log" 2>/dev/null || true
+  exit 1
+fi
+
 echo "JobTrackr actualizado e instalado en: $APP_DIR"
 echo "Build activo: $CURRENT_COMMIT"
+echo "Servidor activo: http://127.0.0.1:${APP_PORT}"
 echo "La extensión Safari se ha regenerado, instalado y lanzado automáticamente."
