@@ -67,6 +67,12 @@ export const PARSED_JOB_JSON_SCHEMA = {
   }, required: ["company","jobTitle","location","salaryRange","jobType","experience","skills","emailDomain","description"], additionalProperties: false,
 } as const;
 
+export const parsedJobsSchema = z.array(parsedJobSchema).max(25);
+export type ParsedJobs = z.infer<typeof parsedJobsSchema>;
+export const PARSED_JOBS_JSON_SCHEMA = {
+  type: "array", maxItems: 25, items: PARSED_JOB_JSON_SCHEMA,
+} as const;
+
 // ---------------------------------------------------------------------------
 // Email classification
 // ---------------------------------------------------------------------------
