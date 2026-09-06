@@ -1,12 +1,9 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import {
-  CATEGORY_TO_STATUS,
-  TERMINAL_STATUSES,
-  type JobStatus,
-} from "@jobtrackr/core";
-import { classifyEmail, aiAvailable } from "./ai";
+import { CATEGORY_TO_STATUS, TERMINAL_STATUSES, type JobStatus } from "@jobtrackr/core";
+import { classifyEmail, aiAvailable, parseJobPosting, personalizeJob } from "./ai";
 import { getDb, getSetting, setSetting, deleteSetting } from "./db";
-import { listJobs, matchJobForEmail, shouldAutoApply, updateJob } from "./jobs";
+import { createJob, listJobs, matchJobForEmail, shouldAutoApply, updateJob } from "./jobs";
+import type { Profile } from "@jobtrackr/core";
 
 const SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -14,146 +11,57 @@ const GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me";
 const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
 const OAUTH_STATE_KEY = "gmailOAuthState";
 
-const ATS_DOMAINS = [
-  "greenhouse.io", "greenhouse-mail.io", "lever.co", "hire.lever.co", "ashbyhq.com",
-  "myworkday.com", "myworkdayjobs.com", "icims.com", "smartrecruiters.com", "jobvite.com",
-  "bamboohr.com", "workablemail.com", "recruitee.com", "breezy.hr", "rippling.com",
-];
-
 interface GmailTokens { access_token: string; refresh_token?: string; expires_at: number; }
 interface GmailOAuthState { value: string; expires_at: number; }
 
-function creds() {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  if (!clientId || !clientSecret) return null;
-  return { clientId, clientSecret };
-}
-function redirectUri(): string {
-  const base = process.env.APP_URL || "http://localhost:3001";
-  return `${base.replace(/\/$/, "")}/api/gmail/callback`;
-}
-export function gmailConfigured(): boolean { return creds() !== null; }
-export function gmailConnected(): boolean { return getSetting<GmailTokens>("gmailTokens") !== null; }
-export function disconnectGmail(): void {
-  deleteSetting("gmailTokens");
-  deleteSetting("gmailLastSyncAt");
-  deleteSetting(OAUTH_STATE_KEY);
+function creds() { const clientId=process.env.GOOGLE_CLIENT_ID; const clientSecret=process.env.GOOGLE_CLIENT_SECRET; if(!clientId||!clientSecret)return null; return {clientId,clientSecret}; }
+function redirectUri():string { const base=process.env.APP_URL||"http://localhost:3001"; return `${base.replace(/\/$/,"")}/api/gmail/callback`; }
+export function gmailConfigured():boolean{return creds()!==null;}
+export function gmailConnected():boolean{return getSetting<GmailTokens>("gmailTokens")!==null;}
+export function disconnectGmail():void{deleteSetting("gmailTokens");deleteSetting("gmailLastSyncAt");deleteSetting(OAUTH_STATE_KEY);}
+export function buildAuthUrl():string{const c=creds();if(!c)throw new Error("GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set");const state=randomBytes(32).toString("hex");setSetting(OAUTH_STATE_KEY,{value:state,expires_at:Date.now()+OAUTH_STATE_TTL_MS} satisfies GmailOAuthState);const params=new URLSearchParams({client_id:c.clientId,redirect_uri:redirectUri(),response_type:"code",scope:SCOPE,access_type:"offline",prompt:"consent",state});return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;}
+export async function exchangeCode(code:string,state:string):Promise<void>{const expected=getSetting<GmailOAuthState>(OAUTH_STATE_KEY);deleteSetting(OAUTH_STATE_KEY);if(!expected?.value||!expected.expires_at||expected.expires_at<Date.now())throw new Error("Invalid or expired Gmail OAuth state");if(!state||state.length!==expected.value.length)throw new Error("Invalid Gmail OAuth state");const a=Buffer.from(expected.value,"utf8"),b=Buffer.from(state,"utf8");if(!timingSafeEqual(a,b))throw new Error("Invalid Gmail OAuth state");const c=creds();if(!c)throw new Error("Google OAuth credentials not configured");const res=await fetch(TOKEN_URL,{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body:new URLSearchParams({code,client_id:c.clientId,client_secret:c.clientSecret,redirect_uri:redirectUri(),grant_type:"authorization_code"})});if(!res.ok)throw new Error(`Token exchange failed: ${await res.text()}`);const data=await res.json() as {access_token:string;refresh_token?:string;expires_in:number};setSetting("gmailTokens",{access_token:data.access_token,refresh_token:data.refresh_token,expires_at:Date.now()+data.expires_in*1000} satisfies GmailTokens);}
+async function getAccessToken():Promise<string>{const tokens=getSetting<GmailTokens>("gmailTokens");if(!tokens)throw new Error("Gmail is not connected");if(Date.now()<tokens.expires_at-60000)return tokens.access_token;const c=creds();if(!c||!tokens.refresh_token)throw new Error("Gmail token expired and cannot be refreshed — reconnect Gmail");const res=await fetch(TOKEN_URL,{method:"POST",headers:{"content-type":"application/x-www-form-urlencoded"},body:new URLSearchParams({client_id:c.clientId,client_secret:c.clientSecret,refresh_token:tokens.refresh_token,grant_type:"refresh_token"})});if(!res.ok)throw new Error(`Token refresh failed: ${await res.text()}`);const data=await res.json() as {access_token:string;expires_in:number};const updated={...tokens,access_token:data.access_token,expires_at:Date.now()+data.expires_in*1000};setSetting("gmailTokens",updated);return updated.access_token;}
+async function gmailGet(pathAndQuery:string):Promise<Record<string,unknown>>{const token=await getAccessToken();const res=await fetch(`${GMAIL_API}${pathAndQuery}`,{headers:{authorization:`Bearer ${token}`}});if(!res.ok)throw new Error(`Gmail API ${res.status}: ${await res.text()}`);return await res.json() as Record<string,unknown>;}
+function labelQuery():string{const label=(process.env.GMAIL_LABEL||"LinkedIn").trim();if(!label)throw new Error("GMAIL_LABEL is empty");return `label:${label.replace(/\s+/g,"-")}`;}
+function headerValue(headers:Array<{name:string;value:string}>,name:string):string{return headers.find(h=>h.name.toLowerCase()===name.toLowerCase())?.value??"";}
+function decodeBase64Url(data:string):string{return Buffer.from(data.replace(/-/g,"+").replace(/_/g,"/"),"base64").toString("utf8");}
+interface GmailPart{mimeType?:string;body?:{data?:string};parts?:GmailPart[];}
+function extractBody(payload:GmailPart):string{if(payload.mimeType==="text/plain"&&payload.body?.data)return decodeBase64Url(payload.body.data);if(payload.parts)for(const p of payload.parts){const plain=extractBody(p);if(plain)return plain;}if(payload.mimeType==="text/html"&&payload.body?.data)return decodeBase64Url(payload.body.data).replace(/<style[\s\S]*?<\/style>/gi," ").replace(/<[^>]+>/g," ").replace(/&nbsp;/g," ").replace(/\s+/g," ");return "";}
+function firstUrl(text:string):string|null{const urls=text.match(/https?:\/\/[^\s<>"']+/g)||[];return urls.map(u=>u.replace(/[),.;]+$/g,"")).find(u=>/linkedin\.com\/jobs|greenhouse|lever\.co|ashbyhq|workday|smartrecruiters|jobvite|bamboohr|workable/i.test(u))??urls[0]??null;}
+function contextKey(jobId:number):string{return `jobContext:${jobId}`;}
+export interface SyncResult{scanned:number;classified:number;linked:number;created:number;statusUpdates:Array<{jobId:number;company:string;toStatus:string}>;errors:string[];label:string;}
+
+export async function syncGmail():Promise<SyncResult>{
+  if(!aiAvailable())throw new Error("AI provider is not configured — email classification needs an available provider");
+  const db=getDb();const result:SyncResult={scanned:0,classified:0,linked:0,created:0,statusUpdates:[],errors:[],label:process.env.GMAIL_LABEL||"LinkedIn"};
+  const lastSync=getSetting<number>("gmailLastSyncAt");
+  const timeClause=lastSync?`after:${lastSync}`:"";
+  const q=encodeURIComponent([labelQuery(),timeClause].filter(Boolean).join(" "));
+  const list=await gmailGet(`/messages?q=${q}&maxResults=100&includeSpamTrash=false`) as {messages?:Array<{id:string;threadId:string}>};
+  const messages=list.messages??[];result.scanned=messages.length;
+  const seen=db.prepare("SELECT 1 FROM emails WHERE gmailId = ?");
+  const trackedCompanies=listJobs().filter(j=>!TERMINAL_STATUSES.includes(j.status as JobStatus)).map(j=>j.company);
+  const profile=getSetting<Profile>("profile");
+  for(const m of messages){if(seen.get(m.id))continue;try{
+    const full=await gmailGet(`/messages/${m.id}?format=full`) as {snippet?:string;internalDate?:string;payload?:GmailPart&{headers?:Array<{name:string;value:string}>}};
+    const headers=full.payload?.headers??[];const from=headerValue(headers,"From");const subject=headerValue(headers,"Subject");const body=full.payload?extractBody(full.payload):"";const receivedAt=full.internalDate?new Date(Number(full.internalDate)).toISOString():new Date().toISOString();
+    const classification=await classifyEmail({from,subject,body:body||full.snippet||"",trackedCompanies});result.classified++;
+    if(classification.category==="not_job_related")continue;
+    const senderDomain=from.match(/@([\w.-]+)/)?.[1]??null;let job=matchJobForEmail(senderDomain,classification.company);let created=false;
+    const looksLikePosting=classification.category==="job_posting" || (classification.category==="other_job_related"&&Boolean(classification.company&&classification.jobTitle));
+    if(!job&&looksLikePosting&&classification.confidence>=0.65&&classification.company&&classification.jobTitle){
+      const parsed=await parseJobPosting([`Subject: ${subject}`,`From: ${from}`,body||full.snippet||""].join("\n\n"));
+      if(parsed.company&&parsed.jobTitle){job=createJob({company:parsed.company||classification.company,jobTitle:parsed.jobTitle||classification.jobTitle,location:parsed.location,salaryRange:parsed.salaryRange,jobType:parsed.jobType,experience:parsed.experience,skills:parsed.skills,emailDomain:parsed.emailDomain||senderDomain,description:parsed.description,sourceUrl:firstUrl(body),status:"Saved"},"gmail");result.created++;created=true;}
+    }
+    if(job){result.linked++;if(created&&profile){try{const context=await personalizeJob({job,profile});setSetting(contextKey(job.id),context);}catch(e){result.errors.push(`${m.id}: context: ${e instanceof Error?e.message:String(e)}`);}}
+      const suggested=CATEGORY_TO_STATUS[classification.category]??null;let applied=0;if(suggested&&classification.confidence>=0.75&&shouldAutoApply(job.status,suggested)){updateJob(job.id,{status:suggested},"gmail");applied=1;result.statusUpdates.push({jobId:job.id,company:job.company,toStatus:suggested});}
+    }
+    db.prepare(`INSERT INTO emails (gmailId,threadId,jobId,fromAddress,subject,snippet,receivedAt,category,confidence,summary,suggestedStatus,statusApplied) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).run(m.id,m.threadId??null,job?.id??null,from,subject,(full.snippet??"").slice(0,500),receivedAt,classification.category,classification.confidence,classification.summary,CATEGORY_TO_STATUS[classification.category]??null,applied);
+  }catch(err){result.errors.push(`${m.id}: ${err instanceof Error?err.message:String(err)}`);}}
+  setSetting("gmailLastSyncAt",Math.floor(Date.now()/1000));setSetting("gmailLastSyncResult",{at:new Date().toISOString(),...result});return result;
 }
 
-export function buildAuthUrl(): string {
-  const c = creds();
-  if (!c) throw new Error("GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set");
-  const state = randomBytes(32).toString("hex");
-  setSetting(OAUTH_STATE_KEY, { value: state, expires_at: Date.now() + OAUTH_STATE_TTL_MS } satisfies GmailOAuthState);
-  const params = new URLSearchParams({
-    client_id: c.clientId, redirect_uri: redirectUri(), response_type: "code", scope: SCOPE,
-    access_type: "offline", prompt: "consent", state,
-  });
-  return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
-}
-
-export async function exchangeCode(code: string, state: string): Promise<void> {
-  const expected = getSetting<GmailOAuthState>(OAUTH_STATE_KEY);
-  deleteSetting(OAUTH_STATE_KEY);
-  if (!expected?.value || !expected.expires_at || expected.expires_at < Date.now()) throw new Error("Invalid or expired Gmail OAuth state");
-  if (!state || state.length !== expected.value.length) throw new Error("Invalid Gmail OAuth state");
-  const a = Buffer.from(expected.value, "utf8");
-  const b = Buffer.from(state, "utf8");
-  if (!timingSafeEqual(a, b)) throw new Error("Invalid Gmail OAuth state");
-
-  const c = creds();
-  if (!c) throw new Error("Google OAuth credentials not configured");
-  const res = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ code, client_id: c.clientId, client_secret: c.clientSecret, redirect_uri: redirectUri(), grant_type: "authorization_code" }),
-  });
-  if (!res.ok) throw new Error(`Token exchange failed: ${await res.text()}`);
-  const data = (await res.json()) as { access_token: string; refresh_token?: string; expires_in: number };
-  setSetting("gmailTokens", { access_token: data.access_token, refresh_token: data.refresh_token, expires_at: Date.now() + data.expires_in * 1000 } satisfies GmailTokens);
-}
-
-async function getAccessToken(): Promise<string> {
-  const tokens = getSetting<GmailTokens>("gmailTokens");
-  if (!tokens) throw new Error("Gmail is not connected");
-  if (Date.now() < tokens.expires_at - 60_000) return tokens.access_token;
-  const c = creds();
-  if (!c || !tokens.refresh_token) throw new Error("Gmail token expired and cannot be refreshed — reconnect Gmail");
-  const res = await fetch(TOKEN_URL, {
-    method: "POST",
-    headers: { "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ client_id: c.clientId, client_secret: c.clientSecret, refresh_token: tokens.refresh_token, grant_type: "refresh_token" }),
-  });
-  if (!res.ok) throw new Error(`Token refresh failed: ${await res.text()}`);
-  const data = (await res.json()) as { access_token: string; expires_in: number };
-  const updated: GmailTokens = { ...tokens, access_token: data.access_token, expires_at: Date.now() + data.expires_in * 1000 };
-  setSetting("gmailTokens", updated);
-  return updated.access_token;
-}
-
-async function gmailGet(pathAndQuery: string): Promise<Record<string, unknown>> {
-  const token = await getAccessToken();
-  const res = await fetch(`${GMAIL_API}${pathAndQuery}`, { headers: { authorization: `Bearer ${token}` } });
-  if (!res.ok) throw new Error(`Gmail API ${res.status}: ${await res.text()}`);
-  return (await res.json()) as Record<string, unknown>;
-}
-function buildQuery(lastSyncEpochSec: number | null): string {
-  const jobs = listJobs();
-  const domains = new Set<string>(ATS_DOMAINS);
-  for (const j of jobs) { const d = j.emailDomain?.replace(/^@/, "").trim(); if (d && d.includes(".")) domains.add(d.toLowerCase()); }
-  const fromClause = `from:(${[...domains].join(" OR ")})`;
-  const subjectClause = 'subject:("application" OR "interview" OR "your candidacy" OR "assessment" OR "offer" OR "position" OR "next steps")';
-  const timeClause = lastSyncEpochSec ? `after:${lastSyncEpochSec}` : "newer_than:14d";
-  return `(${fromClause} OR ${subjectClause}) ${timeClause} -in:chats -in:spam -in:trash`;
-}
-function headerValue(headers: Array<{ name: string; value: string }>, name: string): string { return headers.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value ?? ""; }
-function decodeBase64Url(data: string): string { return Buffer.from(data.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"); }
-interface GmailPart { mimeType?: string; body?: { data?: string }; parts?: GmailPart[]; }
-function extractBody(payload: GmailPart): string {
-  if (payload.mimeType === "text/plain" && payload.body?.data) return decodeBase64Url(payload.body.data);
-  if (payload.parts) for (const p of payload.parts) { const plain = extractBody(p); if (plain) return plain; }
-  if (payload.mimeType === "text/html" && payload.body?.data) return decodeBase64Url(payload.body.data).replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ");
-  return "";
-}
-export interface SyncResult { scanned: number; classified: number; linked: number; statusUpdates: Array<{ jobId: number; company: string; toStatus: string }>; errors: string[]; }
-export async function syncGmail(): Promise<SyncResult> {
-  if (!aiAvailable()) throw new Error("AI provider is not configured — email classification needs an available provider");
-  const db = getDb();
-  const result: SyncResult = { scanned: 0, classified: 0, linked: 0, statusUpdates: [], errors: [] };
-  const lastSync = getSetting<number>("gmailLastSyncAt");
-  const syncStartedAt = Math.floor(Date.now() / 1000);
-  const q = encodeURIComponent(buildQuery(lastSync));
-  const list = (await gmailGet(`/messages?q=${q}&maxResults=50`)) as { messages?: Array<{ id: string; threadId: string }> };
-  const messages = list.messages ?? [];
-  result.scanned = messages.length;
-  const seen = db.prepare("SELECT 1 FROM emails WHERE gmailId = ?");
-  const trackedCompanies = listJobs().filter((j) => !TERMINAL_STATUSES.includes(j.status as JobStatus)).map((j) => j.company);
-  for (const m of messages) {
-    if (seen.get(m.id)) continue;
-    try {
-      const full = (await gmailGet(`/messages/${m.id}?format=full`)) as { snippet?: string; internalDate?: string; payload?: GmailPart & { headers?: Array<{ name: string; value: string }> } };
-      const headers = full.payload?.headers ?? [];
-      const from = headerValue(headers, "From");
-      const subject = headerValue(headers, "Subject");
-      const body = full.payload ? extractBody(full.payload) : "";
-      const receivedAt = full.internalDate ? new Date(Number(full.internalDate)).toISOString() : new Date().toISOString();
-      const classification = await classifyEmail({ from, subject, body: body || full.snippet || "", trackedCompanies });
-      result.classified++;
-      if (classification.category === "not_job_related") continue;
-      const senderDomain = from.match(/@([\w.-]+)/)?.[1] ?? null;
-      const job = matchJobForEmail(senderDomain, classification.company);
-      if (job) result.linked++;
-      const suggested = CATEGORY_TO_STATUS[classification.category] ?? null;
-      let applied = 0;
-      if (job && suggested && classification.confidence >= 0.75 && shouldAutoApply(job.status, suggested)) {
-        updateJob(job.id, { status: suggested }, "gmail"); applied = 1;
-        result.statusUpdates.push({ jobId: job.id, company: job.company, toStatus: suggested });
-      }
-      db.prepare(`INSERT INTO emails (gmailId, threadId, jobId, fromAddress, subject, snippet, receivedAt, category, confidence, summary, suggestedStatus, statusApplied) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(m.id, m.threadId ?? null, job?.id ?? null, from, subject, (full.snippet ?? "").slice(0, 500), receivedAt, classification.category, classification.confidence, classification.summary, suggested, applied);
-    } catch (err) { result.errors.push(`${m.id}: ${err instanceof Error ? err.message : String(err)}`); }
-  }
-  setSetting("gmailLastSyncAt", syncStartedAt);
-  setSetting("gmailLastSyncResult", { at: new Date().toISOString(), ...result });
-  return result;
-}
+export function getJobContext(jobId:number):unknown{return getSetting(contextKey(jobId));}
+export function setJobContext(jobId:number,value:unknown):void{setSetting(contextKey(jobId),value);}
+export function deleteJobContext(jobId:number):void{deleteSetting(contextKey(jobId));}
