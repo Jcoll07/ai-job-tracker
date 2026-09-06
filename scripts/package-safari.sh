@@ -20,11 +20,12 @@ if [ "${CI:-}" != "true" ]; then
   codesign --verify --deep --strict "$CONTAINER_APP" >/dev/null 2>&1 || { printf '%s\n' "Installed Safari app failed code-signature verification." >&2; exit 1; }
   EXT_BUNDLE_ID=$(plutil -extract CFBundleIdentifier raw -o - "$APPEX/Contents/Info.plist" 2>/dev/null || true); [ -n "$EXT_BUNDLE_ID" ] || { printf '%s\n' "Could not read the embedded Safari extension bundle identifier." >&2; exit 1; }
   open "$CONTAINER_APP"
+  open -a Safari >/dev/null 2>&1 || true
   if command -v pluginkit >/dev/null 2>&1; then
     pluginkit -a "$APPEX" >/dev/null 2>&1 || true
     REGISTERED=0; for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do if pluginkit -mAvvv -p com.apple.Safari.web-extension 2>/dev/null | grep -Fq "$EXT_BUNDLE_ID"; then REGISTERED=1; break; fi; sleep 1; done
     if [ "$REGISTERED" -ne 1 ]; then
-      printf '%s\n' "WARNING: Safari has not registered the extension yet. Safari requires an opened containing app and, for unsigned development builds, Allow Unsigned Extensions. The web app is still installed." >&2
+      printf '%s\n' "WARNING: Safari has not registered the extension yet. Safari requires the containing app to be opened and, for unsigned development builds, Allow Unsigned Extensions. Safari may also need the extension project rebuilt after enabling unsigned extensions." >&2
     fi
   fi
   printf '\nJobTrackr Safari extension built and installed.\nApp: %s\nExtension: %s\n' "$CONTAINER_APP" "$EXT_BUNDLE_ID"
