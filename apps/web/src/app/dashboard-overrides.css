@@ -1,0 +1,75 @@
+/* Dashboard and settings usability overrides. Loaded after the base UI system. */
+.container:has(.dashboard-wide) {
+  width: calc(100% - 32px);
+  max-width: none;
+  padding-left: 0;
+  padding-right: 0;
+}
+.dashboard-wide {
+  width: 100% !important;
+  max-width: none !important;
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+}
+.dashboard-wide .jobs-table {
+  width: 100%;
+}
+.dashboard-wide .jobs-table table.fixed {
+  min-width: 1900px !important;
+  table-layout: auto !important;
+}
+.dashboard-wide .jobs-table th,
+.dashboard-wide .jobs-table td {
+  min-width: 110px;
+  padding-left: 16px;
+  padding-right: 16px;
+}
+.dashboard-wide .jobs-table th:nth-child(2),
+.dashboard-wide .jobs-table td:nth-child(2) { min-width: 190px; }
+.dashboard-wide .jobs-table th:nth-child(3),
+.dashboard-wide .jobs-table td:nth-child(3) { min-width: 300px; }
+.dashboard-wide .jobs-table th:nth-child(4),
+.dashboard-wide .jobs-table td:nth-child(4) { min-width: 260px; }
+.dashboard-wide .jobs-table th:nth-child(5),
+.dashboard-wide .jobs-table td:nth-child(5) { min-width: 150px; }
+.dashboard-wide .jobs-table th:nth-child(6),
+.dashboard-wide .jobs-table td:nth-child(6) { min-width: 180px; }
+.dashboard-wide .jobs-table th:nth-child(7),
+.dashboard-wide .jobs-table td:nth-child(7),
+.dashboard-wide .jobs-table th:nth-child(8),
+.dashboard-wide .jobs-table td:nth-child(8) { min-width: 90px; }
+.dashboard-wide .jobs-table th:nth-child(9),
+.dashboard-wide .jobs-table td:nth-child(9) { min-width: 130px; }
+.dashboard-wide .jobs-table th:nth-child(10),
+.dashboard-wide .jobs-table td:nth-child(10) { min-width: 150px; }
+.dashboard-wide .jobs-table th:nth-child(11),
+.dashboard-wide .jobs-table td:nth-child(11) { min-width: 80px; }
+.dashboard-wide .jobs-table td:nth-child(2),
+.dashboard-wide .jobs-table td:nth-child(3),
+.dashboard-wide .jobs-table td:nth-child(4),
+.dashboard-wide .jobs-table td:nth-child(6) {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+.dashboard-wide .jobs-table td:nth-child(3),
+.dashboard-wide .jobs-table td:nth-child(4) {
+  line-height: 1.35;
+}
+.dashboard-wide .jobs-table th:first-child,
+.dashboard-wide .jobs-table td:first-child { min-width: 48px; width: 48px; }
+
+/* Model selectors must remain usable even when discovery returns slowly. */
+.settings-model-select {
+  width: 100%;
+  min-height: 46px;
+}
+
+@media (max-width: 900px) {
+  .container:has(.dashboard-wide) {
+    width: calc(100% - 24px);
+  }
+  .dashboard-wide .jobs-table table.fixed {
+    min-width: 1550px !important;
+  }
+}
