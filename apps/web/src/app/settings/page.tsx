@@ -1,14 +1,11 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@/lib/client";
 
 interface Settings { aiConfigured:boolean; gmailConfigured:boolean; gmailConnected:boolean; extensionToken:string; appUrl:string; syncIntervalMinutes:number }
 
 function SettingsInner(){
-  const params=useSearchParams();
-  const gmailResult=params.get("gmail");
   const [settings,setSettings]=useState<Settings|null>(null);
   const [loadError,setLoadError]=useState<string|null>(null);
   const [notice,setNotice]=useState<{kind:"ok"|"err";text:string}|null>(null);
@@ -17,20 +14,25 @@ function SettingsInner(){
 
   const load=useCallback(async()=>{
     setLoadError(null);
+    const controller=new AbortController();
+    const timeout=window.setTimeout(()=>controller.abort(),8000);
     try{
-      const s=await api<Settings>("/api/settings");
+      const s=await api<Settings>("/api/settings",{signal:controller.signal});
       setSettings(s);
       setIntervalMin(String(s.syncIntervalMinutes));
     }catch(error){
-      setLoadError(error instanceof Error?error.message:"Unable to load settings.");
+      setLoadError(error instanceof DOMException&&error.name==="AbortError"?"The settings request timed out. Check that the local JobTrackr server is running.":error instanceof Error?error.message:"Unable to load settings.");
+    }finally{
+      window.clearTimeout(timeout);
     }
   },[]);
 
   useEffect(()=>{
     void load();
+    const gmailResult=new URLSearchParams(window.location.search).get("gmail");
     if(gmailResult==="connected")setNotice({kind:"ok",text:"Gmail connected!"});
     if(gmailResult==="error"||gmailResult==="denied")setNotice({kind:"err",text:"Gmail connection failed — check OAuth settings."});
-  },[load,gmailResult]);
+  },[load]);
 
   async function disconnectGmail(){await api("/api/gmail/sync",{method:"DELETE"});setNotice({kind:"ok",text:"Gmail disconnected."});await load();}
   async function saveSyncInterval(){const m=Number(interval);if(!Number.isFinite(m))return;const r=await api<{syncIntervalMinutes:number}>("/api/settings",{method:"POST",json:{action:"setSyncInterval",minutes:m}});setIntervalMin(String(r.syncIntervalMinutes));setNotice({kind:"ok",text:`Auto-sync interval set to ${r.syncIntervalMinutes} minutes.`});}
@@ -48,4 +50,4 @@ function SettingsInner(){
   </div>;
 }
 
-export default function SettingsPage(){return <Suspense fallback={<p className="muted">Loading…</p>}><SettingsInner/></Suspense>;}
+export default function SettingsPage(){return <SettingsInner/>;}
