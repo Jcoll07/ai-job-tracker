@@ -33,8 +33,13 @@ else
   exit 1
 fi
 
+# Keep the containing-app name and bundle identifier stable so rebuilding the
+# project updates the existing Safari extension instead of registering a new
+# extension identity on every update.
 xcrun "$PACKAGER" "$OUTPUT_DIR" \
   --project-location "$PROJECT_DIR" \
+  --app-name "JobTrackr Safari Extension" \
+  --bundle-identifier "com.jcoll07.jobtrackr.safariextension" \
   --macos-only \
   --copy-resources \
   --no-open \
