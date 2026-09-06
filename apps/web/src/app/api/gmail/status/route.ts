@@ -14,5 +14,6 @@ export async function GET() {
     lastSuccessfulSync: getSetting("gmailLastSuccessfulSyncResult"),
     historicalLinkedMessages,
     hasHistoricalLinkedMessage: historicalLinkedMessages > 0,
+    historicalBackfillReady: getSetting<boolean>("gmailHistoricalBackfillReady") ?? false,
   });
 }
