@@ -10,6 +10,11 @@ const inputSchema = z.object({
   text: z.string().max(MAX_TEXT_CHARS).optional(),
 }).strict();
 
+function aiFailureStatus(err: unknown): number {
+  const message = err instanceof Error ? err.message : String(err);
+  return /Local AI request failed \(HTTP (401|403|404|408|429|500|502|503|504)\)|fetch failed|ECONNREFUSED|ETIMEDOUT|UND_ERR/i.test(message) ? 503 : 502;
+}
+
 export async function POST(req: NextRequest) {
   if (!aiAvailable()) return NextResponse.json({ error: "AI provider is not configured" }, { status: 503 });
   const length = Number(req.headers.get("content-length") ?? 0);
@@ -23,6 +28,6 @@ export async function POST(req: NextRequest) {
     const job = await parseJobPosting(content);
     return NextResponse.json({ parsed: { ...job, sourceUrl: parsed.data.url ?? null } }, { headers: { "Cache-Control": "no-store" } });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : "Analysis failed" }, { status: 502 });
+    return NextResponse.json({ error: err instanceof Error ? err.message : "Analysis failed" }, { status: aiFailureStatus(err) });
   }
 }
