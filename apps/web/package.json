@@ -11,7 +11,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "latest",
     "@jobtrackr/core": "*",
-    "better-sqlite3": "^11.10.0",
+    "better-sqlite3": "^13.0.3",
     "next": "^15.5.25",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

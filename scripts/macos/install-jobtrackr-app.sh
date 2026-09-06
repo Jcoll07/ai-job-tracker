@@ -18,7 +18,6 @@ sed "s|__PROJECT_DIR__|${ROOT_DIR//|/\\|}|g" "${ROOT_DIR}/scripts/macos/JobTrack
 osacompile -o "$APP_DIR" "$TMP_SCRIPT" >/dev/null
 rm -f "$TMP_SCRIPT"
 
-# Keep the launcher local-only and make it easy to find from Finder/Dock.
 /usr/bin/touch "$APP_DIR/Contents/Resources/.jobtrackr-local"
 
 cd "$ROOT_DIR"
@@ -27,26 +26,34 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PAT
 command -v node >/dev/null 2>&1 || { echo "Error: Node.js no está disponible."; exit 1; }
 command -v npm >/dev/null 2>&1 || { echo "Error: npm no está disponible."; exit 1; }
 
-# Native modules must match the Node.js ABI used to launch the local server.
+# Install the JS dependency tree without executing native install scripts from the old lockfile.
+# The workspace declares better-sqlite3 13.x, which uses N-API and bundles the macOS binary.
 if [ ! -d node_modules ] || [ ! -x node_modules/.bin/next ]; then
   echo "Instalando dependencias..."
-  npm ci
+  npm install --package-lock=false --save=false --ignore-scripts
 fi
-if ! node -e "require('better-sqlite3');" >/dev/null 2>&1; then
-  echo "Recompilando better-sqlite3 desde código fuente para el Node.js activo..."
-  npm rebuild better-sqlite3 --build-from-source
-fi
-node -e "require('better-sqlite3');"
 
-# Ensure the production build exists before the first launch.
+# Install the native SQLite dependency in its actual workspace. Running npm install from
+# the monorepo root can otherwise leave the old workspace copy at apps/web/node_modules.
+cd "${ROOT_DIR}/apps/web"
+sqliteVersion=$(node -p 'try { require("better-sqlite3/package.json").version } catch { "missing" }')
+if [[ "$sqliteVersion" != 13.* ]]; then
+  echo "Preparando better-sqlite3 13.0.3 (N-API, compatible con Node 22+)..."
+  npm install --package-lock=false --save=false better-sqlite3@13.0.3
+fi
+
+if ! node -e 'require("better-sqlite3")' >/dev/null 2>&1; then
+  echo "Reinstalando better-sqlite3 13.0.3 para corregir el binario nativo..."
+  rm -rf "${ROOT_DIR}/apps/web/node_modules/better-sqlite3"
+  npm install --package-lock=false --save=false better-sqlite3@13.0.3
+fi
+node -e 'require("better-sqlite3")'
+cd "$ROOT_DIR"
+
 if [ ! -f "${ROOT_DIR}/apps/web/.next/BUILD_ID" ]; then
   echo "Preparando la aplicación (build de producción)..."
   npm run build
 fi
-
-# Record the exact source revision represented by this local build.
-CURRENT_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
-printf '%s' "$CURRENT_COMMIT" > "${ROOT_DIR}/.jobtrackr-build-commit"
 
 open -R "$APP_DIR"
 echo "JobTrackr instalado en: $APP_DIR"
