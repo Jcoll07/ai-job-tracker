@@ -20,6 +20,7 @@ if [ "${CI:-}" != "true" ]; then
   if [ "$SIGN_IDENTITY" != "-" ]; then codesign --force --deep --sign "$SIGN_IDENTITY" "$CONTAINER_APP" >/dev/null; else codesign --force --deep --sign - "$CONTAINER_APP" >/dev/null; fi
   codesign --verify --deep --strict "$CONTAINER_APP" >/dev/null 2>&1 || { printf '%s\n' "Installed Safari app failed code-signature verification." >&2; exit 1; }
   EXT_BUNDLE_ID=$(plutil -extract CFBundleIdentifier raw -o - "$APPEX/Contents/Info.plist" 2>/dev/null || true); [ -n "$EXT_BUNDLE_ID" ] || { printf '%s\n' "Could not read the embedded Safari extension bundle identifier." >&2; exit 1; }
+  open "$PROJECT"
   open "$CONTAINER_APP"
   open -a Safari >/dev/null 2>&1 || true
   if command -v pluginkit >/dev/null 2>&1; then
