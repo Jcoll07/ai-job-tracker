@@ -1,13 +1,14 @@
 #!/bin/sh
 set -eu
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-EXT_DIR="$ROOT_DIR/apps/extension"; OUTPUT_DIR="$EXT_DIR/.output/safari-mv2"; PROJECT_DIR="$EXT_DIR/safari"; INSTALL_DIR="${HOME}/Applications"; CONTAINER_APP="$INSTALL_DIR/JobTrackr Safari Extension.app"; DERIVED_DIR="$EXT_DIR/.output/safari-derived"
+EXT_DIR="$ROOT_DIR/apps/extension"; OUTPUT_DIR="$EXT_DIR/.output/safari-mv2"; PROJECT_DIR="$EXT_DIR/.output/safari-xcode"; INSTALL_DIR="${HOME}/Applications"; CONTAINER_APP="$INSTALL_DIR/JobTrackr Safari Extension.app"; DERIVED_DIR="$EXT_DIR/.output/safari-derived"
 if [ "$(uname -s)" != "Darwin" ]; then printf '%s\n' "Safari packaging is only available on macOS." >&2; exit 1; fi
 command -v xcrun >/dev/null 2>&1 || { printf '%s\n' "Xcode command-line tools are required (xcrun not found)." >&2; exit 1; }; command -v xcodebuild >/dev/null 2>&1 || { printf '%s\n' "Xcode is required (xcodebuild not found)." >&2; exit 1; }; command -v plutil >/dev/null 2>&1 || { printf '%s\n' "macOS plutil is required." >&2; exit 1; }; command -v codesign >/dev/null 2>&1 || { printf '%s\n' "macOS codesign is required." >&2; exit 1; }
-cd "$ROOT_DIR"; npm run build:safari --workspace=apps/extension; [ -d "$OUTPUT_DIR" ] || { printf '%s\n' "Safari build output not found: $OUTPUT_DIR" >&2; exit 1; }; rm -rf "$PROJECT_DIR"; mkdir -p "$PROJECT_DIR"
+cd "$ROOT_DIR"; npm run build:safari --workspace=apps/extension; [ -d "$OUTPUT_DIR" ] || { printf '%s\n' "Safari build output not found: $OUTPUT_DIR" >&2; exit 1; }; rm -rf "$PROJECT_DIR"; mkdir -p "$(dirname "$PROJECT_DIR")"
 if xcrun --find safari-web-extension-packager >/dev/null 2>&1; then PACKAGER="safari-web-extension-packager"; elif xcrun --find safari-web-extension-converter >/dev/null 2>&1; then PACKAGER="safari-web-extension-converter"; else printf '%s\n' "Safari web-extension packager/converter is unavailable in the selected Xcode toolchain." >&2; exit 1; fi
 xcrun "$PACKAGER" "$OUTPUT_DIR" --project-location "$PROJECT_DIR" --app-name "JobTrackr Safari Extension" --bundle-identifier "com.jcoll07.jobtrackr.safariextension" --macos-only --copy-resources --no-open --no-prompt --force
-PROJECT=$(find "$PROJECT_DIR" -type d -name '*.xcodeproj' -print -quit); [ -n "$PROJECT" ] || { printf '%s\n' "Safari Xcode project was not generated." >&2; exit 1; }; xcodebuild -list -project "$PROJECT" >/dev/null
+PROJECT=$(find "$PROJECT_DIR" -type d -name '*.xcodeproj' -print -quit); [ -n "$PROJECT" ] || { printf '%s\n' "Safari Xcode project was not generated under $PROJECT_DIR." >&2; exit 1; }; PBXPROJ="$PROJECT/project.pbxproj"; [ -s "$PBXPROJ" ] || { printf '%s\n' "Generated Safari Xcode project is invalid: missing or empty project.pbxproj: $PBXPROJ" >&2; exit 1; }
+xcodebuild -list -project "$PROJECT" >/dev/null
 SCHEME=$(xcodebuild -list -json -project "$PROJECT" | plutil -extract project.schemes.0 raw -o - - 2>/dev/null || true); [ -n "$SCHEME" ] || { printf '%s\n' "No Xcode scheme was found for the generated Safari project." >&2; exit 1; }
 rm -rf "$DERIVED_DIR"; BUILD_STATUS=0; xcodebuild -project "$PROJECT" -scheme "$SCHEME" -configuration Debug -derivedDataPath "$DERIVED_DIR" CODE_SIGN_IDENTITY="-" DEVELOPMENT_TEAM="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO build >/dev/null 2>&1 || BUILD_STATUS=$?
 CONTAINER_SOURCE=""; for app in "$DERIVED_DIR"/Build/Products/Debug/*.app; do [ -d "$app" ] || continue; if find "$app/Contents/PlugIns" -maxdepth 2 -name '*.appex' -print -quit 2>/dev/null | grep -q .; then CONTAINER_SOURCE="$app"; break; fi; done
@@ -28,5 +29,5 @@ if [ "${CI:-}" != "true" ]; then
       printf '%s\n' "WARNING: Safari has not registered the extension yet. Safari requires the containing app to be opened and, for unsigned development builds, Allow Unsigned Extensions. Safari may also need the extension project rebuilt after enabling unsigned extensions." >&2
     fi
   fi
-  printf '\nJobTrackr Safari extension built and installed.\nApp: %s\nExtension: %s\n' "$CONTAINER_APP" "$EXT_BUNDLE_ID"
-else printf '\nSafari Xcode project and containing app validated in CI:\n%s\n' "$CONTAINER_SOURCE"; fi
+  printf '\nJobTrackr Safari extension built and installed.\nXcode project: %s\nApp: %s\nExtension: %s\n' "$PROJECT" "$CONTAINER_APP" "$EXT_BUNDLE_ID"
+else printf '\nSafari Xcode project and containing app validated in CI:\nProject: %s\nApp: %s\n' "$PROJECT" "$CONTAINER_SOURCE"; fi
