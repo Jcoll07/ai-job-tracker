@@ -1,5 +1,5 @@
 import {CATEGORY_TO_STATUS,TERMINAL_STATUSES,type JobStatus} from "@jobtrackr/core";
-import {classifyEmail,aiAvailable,parseJobPostings} from "./ai";
+import {classifyEmail,aiAvailable} from "./ai";
 import {getDb,getSetting,setSetting} from "./db";
 import {createJob,findDuplicate,listJobs,matchJobForEmail,shouldAutoApply,updateJob} from "./jobs";
 import {fetchJobPosting,type ScrapedJobPosting} from "./fetch-job";
@@ -22,7 +22,6 @@ function saveState(s:unknown){setSetting("gmailSyncState",s)}
 export function getGmailSyncState(){return getSetting("gmailSyncState")}
 
 export async function syncGmailBatch(){
-  if(!aiAvailable())throw new Error("AI provider is not configured — email classification needs an available provider");
   const label=labelName(),labelId=await resolveLabelId(label),db=getDb();
   const knownIds=new Set((db.prepare("SELECT gmailId FROM emails").all() as any[]).map(x=>x.gmailId));
   let state=getSetting<any>("gmailSyncState");
@@ -34,12 +33,16 @@ export async function syncGmailBatch(){
     const full=await gmailGet(`/messages/${m.id}?format=full`),headers=full.payload?.headers??[],from=header(headers,"From"),subject=header(headers,"Subject"),text=full.payload?body(full.payload):full.snippet||"",messageUrls=urls(text),emailAbout=aboutTheJob(text);
     let postings:any[]=[];let classification:any=null;
     const candidateUrls=messageUrls.filter((u:string)=>/linkedin\.com\/jobs|greenhouse|lever\.co|ashbyhq|workday|smartrecruiters|jobvite|bamboohr|workable/i.test(u));
-    const scrapedJobs:any[]=[];
-    for(const candidateUrl of [...new Set(candidateUrls)].slice(0,8)){try{const scraped=await fetchJobPosting(candidateUrl);if(scraped.open&&scraped.structuredJob)scrapedJobs.push(mergeScraped(scraped.structuredJob,emailAbout))}catch{}}
-    if(scrapedJobs.length)postings=scrapedJobs;
+    const scrapedResults=await Promise.all([...new Set(candidateUrls)].slice(0,8).map(async(candidateUrl)=>{try{const scraped=await fetchJobPosting(candidateUrl);return scraped.open&&scraped.structuredJob?mergeScraped(scraped.structuredJob,emailAbout):null}catch{return null}}));
+    postings=scrapedResults.filter(Boolean) as any[];
     if(!postings.length){
+      if(!aiAvailable())throw new Error("AI provider is not available for email classification");
       classification=await classifyEmail({from,subject,body:text,trackedCompanies});
-      if(classification.category==="other_job_related")try{postings=await parseJobPostings(`Subject: ${subject}\nFrom: ${from}\n\n${text}\n\nCANDIDATE_URLS:\n${messageUrls.join("\n")}`)}catch{}
+      // One AI call is enough: if it identifies a concrete vacancy, create a minimal Job.
+      // Full fields can be completed later from the source URL or on-demand enrichment.
+      if(classification.category==="other_job_related"&&classification.company&&classification.jobTitle){
+        postings=[{company:String(classification.company),jobTitle:String(classification.jobTitle),location:null,salaryRange:null,jobType:"?",experience:null,skills:null,emailDomain:senderDomain(from),description:emailAbout||classification.summary||"",sourceUrl:candidateUrls[0]||null}];
+      }
     }else classification={category:"other_job_related",company:postings[0].company||null,jobTitle:postings[0].jobTitle||null,confidence:1,summary:`${postings.length} vacancy/vacancies extracted without AI`};
     result.classified++;
     let firstJobId:number|null=null;
