@@ -17,7 +17,7 @@ function aboutTheJob(text:string):string|null{const normalized=text.replace(/\r/
 function normalizeJobType(value:any):"On site"|"Remote"|"Hybrid"|"?"{const v=String(value??"").trim().toLowerCase().replace(/[–—-]/g," ").replace(/\s+/g," ");if(!v)return"?";if(/\bremote\b|fully remote|remote first/.test(v))return"Remote";if(/\bhybrid\b/.test(v))return"Hybrid";if(/\bon site\b|onsite|in office|office based/.test(v))return"On site";return"?"}
 function mergeScraped(scraped:ScrapedJobPosting,emailAbout:string|null){return{...scraped,description:scraped.description||emailAbout||"",jobType:normalizeJobType(scraped.jobType)}}
 async function resolveLabelId(name:string){const d=await gmailGet("/labels");const labels=d.labels??[];const exact=labels.find((x:any)=>x.name===name)||labels.find((x:any)=>x.name.toLowerCase()===name.toLowerCase());if(exact)return exact.id;throw new Error(`Gmail label not found: ${name}`)}
-async function collect(labelId:string){const params=new URLSearchParams({labelIds:labelId,maxResults:"100",includeSpamTrash:"false"});const all:any[]=[];let token="";for(let page=0;page<100;page++){const p=new URLSearchParams(params);if(token)p.set("pageToken",token);const d=await gmailGet(`/messages?${p}`);all.push(...(d.messages??[]));token=d.nextPageToken??"";if(!token||all.length>=MAX_MESSAGES)break}return all.slice(0,MAX_MESSAGES)}
+async function collect(labelId:string,afterEpoch?:number){const params=new URLSearchParams({labelIds:labelId,maxResults:"100",includeSpamTrash:"false"});if(afterEpoch){const overlap=Math.max(0,afterEpoch-2*86400);const date=new Date(overlap*1000);const qDate=`${date.getUTCFullYear()}/${String(date.getUTCMonth()+1).padStart(2,"0")}/${String(date.getUTCDate()).padStart(2,"0")}`;params.set("q",`after:${qDate}`)}const all:any[]=[];let token="";for(let page=0;page<100;page++){const p=new URLSearchParams(params);if(token)p.set("pageToken",token);const d=await gmailGet(`/messages?${p}`);all.push(...(d.messages??[]));token=d.nextPageToken??"";if(!token||all.length>=MAX_MESSAGES)break}return all.slice(0,MAX_MESSAGES)}
 function saveState(s:unknown){setSetting("gmailSyncState",s)}
 export function getGmailSyncState(){return getSetting("gmailSyncState")}
 
@@ -25,8 +25,8 @@ export async function syncGmailBatch(){
   const label=labelName(),labelId=await resolveLabelId(label),db=getDb();
   const knownIds=new Set((db.prepare("SELECT gmailId FROM emails").all() as any[]).map(x=>x.gmailId));
   let state=getSetting<any>("gmailSyncState");
-  if(!state||!Array.isArray(state.queue)||state.queue.length===0){const queue=(await collect(labelId)).filter((m:any)=>!knownIds.has(m.id));state={queue,processed:0,total:queue.length,errors:[],startedAt:new Date().toISOString()};saveState(state)}
-  const result:any={scanned:0,classified:0,linked:0,created:0,personalized:0,statusUpdates:[],errors:[],label,queryMode:"labelIds+db-dedup",done:false,processed:state.processed,total:state.total};
+  if(!state||!Array.isArray(state.queue)||state.queue.length===0){const queue=(await collect(labelId,getSetting<number>("gmailLastSyncAt")??undefined)).filter((m:any)=>!knownIds.has(m.id));state={queue,processed:0,total:queue.length,errors:[],startedAt:new Date().toISOString()};saveState(state)}
+  const result:any={scanned:0,classified:0,linked:0,created:0,personalized:0,statusUpdates:[],errors:[],label,queryMode:"incremental+labelIds+db-dedup",done:false,processed:state.processed,total:state.total};
   const trackedCompanies=listJobs().filter(j=>!TERMINAL_STATUSES.includes(j.status as JobStatus)).map(j=>j.company);
   const chunk=state.queue.splice(0,BATCH_SIZE);result.scanned=chunk.length;
   for(const m of chunk){try{
@@ -38,11 +38,7 @@ export async function syncGmailBatch(){
     if(!postings.length){
       if(!aiAvailable())throw new Error("AI provider is not available for email classification");
       classification=await classifyEmail({from,subject,body:text,trackedCompanies});
-      // One AI call is enough: if it identifies a concrete vacancy, create a minimal Job.
-      // Full fields can be completed later from the source URL or on-demand enrichment.
-      if(classification.category==="other_job_related"&&classification.company&&classification.jobTitle){
-        postings=[{company:String(classification.company),jobTitle:String(classification.jobTitle),location:null,salaryRange:null,jobType:"?",experience:null,skills:null,emailDomain:senderDomain(from),description:emailAbout||classification.summary||"",sourceUrl:candidateUrls[0]||null}];
-      }
+      if(classification.category==="other_job_related"&&classification.company&&classification.jobTitle){postings=[{company:String(classification.company),jobTitle:String(classification.jobTitle),location:null,salaryRange:null,jobType:"?",experience:null,skills:null,emailDomain:senderDomain(from),description:emailAbout||classification.summary||"",sourceUrl:candidateUrls[0]||null}]}
     }else classification={category:"other_job_related",company:postings[0].company||null,jobTitle:postings[0].jobTitle||null,confidence:1,summary:`${postings.length} vacancy/vacancies extracted without AI`};
     result.classified++;
     let firstJobId:number|null=null;
