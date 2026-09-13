@@ -22,7 +22,9 @@ jobs:
           cache: npm
 
       - name: Refresh package-lock.json
-        run: npm install --package-lock-only --ignore-scripts
+        run: |
+          npm install --package-lock-only --ignore-scripts
+          npm prune --package-lock-only --ignore-scripts
 
       - name: Commit lockfile when changed
         run: |
