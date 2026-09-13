@@ -3,7 +3,9 @@ import { isIP } from "node:net";
 
 const MAX_REDIRECTS = 4;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
-const FETCH_TIMEOUT_MS = 8000;
+// 8s was too aggressive for LinkedIn and recruiting sites. Keep URL analysis bounded,
+// but allow normal redirects/TLS/server response latency to complete.
+const FETCH_TIMEOUT_MS = 30000;
 
 export interface ScrapedJobPosting {
   company: string | null;
@@ -60,7 +62,7 @@ async function fetchSafe(rawUrl: string): Promise<{ url: string; html: string }>
         signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       });
     } catch (error) {
-      if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) throw new Error("The job posting site did not respond within 8s. It may require JavaScript or block automated requests; use Copy & Paste instead.");
+      if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) throw new Error("The job posting site did not respond within 30s. It may require JavaScript or block automated requests; use Copy & Paste instead.");
       throw new Error(`Unable to fetch the job posting: ${error instanceof Error ? error.message : String(error)}`);
     }
     if (response.status >= 300 && response.status < 400) {
