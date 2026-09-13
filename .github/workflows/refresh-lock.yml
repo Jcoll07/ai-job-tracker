@@ -24,7 +24,13 @@ jobs:
       - name: Refresh package-lock.json
         run: |
           npm install --package-lock-only --ignore-scripts
-          npm prune --package-lock-only --ignore-scripts
+          node - <<'NODE'
+          const fs = require('fs');
+          const file = 'package-lock.json';
+          const lock = JSON.parse(fs.readFileSync(file, 'utf8'));
+          if (lock.packages) delete lock.packages['apps/extension'];
+          fs.writeFileSync(file, JSON.stringify(lock, null, 2) + '\n');
+          NODE
 
       - name: Commit lockfile when changed
         run: |
