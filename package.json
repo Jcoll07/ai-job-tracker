@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "npm run dev --workspace=apps/web",
     "build": "npm run build --workspace=packages/core && npm run build --workspace=apps/web",
+    "build:extension": "npm run build --workspace=apps/extension",
     "package:macos": "node scripts/macos/package-jobtrackr.mjs",
     "test:macos-launcher": "bash scripts/macos/test-launcher-template.sh",
     "typecheck": "npm run typecheck --workspaces --if-present",
