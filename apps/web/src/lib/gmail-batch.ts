@@ -23,7 +23,7 @@ export function getGmailSyncState(){return getSetting("gmailSyncState")}
 
 export async function syncGmailBatch(){
   const label=labelName(),labelId=await resolveLabelId(label),db=getDb();
-  const knownIds=new Set((db.prepare("SELECT gmailId FROM emails").all() as any[]).map(x=>x.gmailId));
+  const knownIds=new Set((db.prepare("SELECT gmailId FROM emails WHERE category != 'sync_error'").all() as any[]).map(x=>x.gmailId));
   let state=getSetting<any>("gmailSyncState");
   if(!state||!Array.isArray(state.queue)||state.queue.length===0){const queue=(await collect(labelId,getSetting<number>("gmailLastSyncAt")??undefined)).filter((m:any)=>!knownIds.has(m.id));state={queue,processed:0,total:queue.length,errors:[],startedAt:new Date().toISOString()};saveState(state)}
   const result:any={scanned:0,classified:0,linked:0,created:0,personalized:0,statusUpdates:[],errors:[],label,queryMode:"incremental+labelIds+db-dedup",done:false,processed:state.processed,total:state.total};
@@ -48,7 +48,10 @@ export async function syncGmailBatch(){
     if(firstJobId&&suggested&&classification.confidence>=.75){const job=listJobs().find(j=>j.id===firstJobId);if(job&&shouldAutoApply(job.status,suggested)){updateJob(firstJobId,{status:suggested},"gmail");result.statusUpdates.push({jobId:firstJobId,company:job.company,toStatus:suggested})}}
     const applied=firstJobId!==null&&result.statusUpdates.some((x:any)=>x.jobId===firstJobId)?1:0;
     db.prepare("INSERT INTO emails (gmailId,threadId,jobId,fromAddress,subject,snippet,receivedAt,category,confidence,summary,suggestedStatus,statusApplied) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(gmailId) DO UPDATE SET jobId=excluded.jobId,category=excluded.category,confidence=excluded.confidence,summary=excluded.summary,suggestedStatus=excluded.suggestedStatus,statusApplied=excluded.statusApplied").run(m.id,m.threadId??null,firstJobId,from,subject,(full.snippet??"").slice(0,500),full.internalDate?new Date(Number(full.internalDate)).toISOString():new Date().toISOString(),classification?.category??"other_job_related",classification?.confidence??0,classification?.summary??"",suggested,applied);
-  }catch(e){const msg=`${m.id}: ${e instanceof Error?e.message:String(e)}`;result.errors.push(msg);state.errors.push(msg)}}
+  }catch(e){
+    const msg=`${m.id}: ${e instanceof Error?e.message:String(e)}`;result.errors.push(msg);state.errors.push(msg);
+    try { const full=await gmailGet(`/messages/${m.id}?format=full`),headers=full.payload?.headers??[],from=header(headers,"From"),subject=header(headers,"Subject"); db.prepare("INSERT INTO emails (gmailId,threadId,jobId,fromAddress,subject,snippet,receivedAt,category,confidence,summary,suggestedStatus,statusApplied) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(gmailId) DO UPDATE SET category=excluded.category,confidence=excluded.confidence,summary=excluded.summary").run(m.id,m.threadId??null,null,from,subject,(full.snippet??"").slice(0,500),full.internalDate?new Date(Number(full.internalDate)).toISOString():new Date().toISOString(),"sync_error",0,msg,null,0); } catch {}
+  }}
   state.processed+=chunk.length;result.processed=state.processed;result.total=state.total;result.done=state.queue.length===0;result.errors=[...state.errors,...result.errors];
   if(result.done){setSetting("gmailLastSyncAt",Math.floor(Date.now()/1000));setSetting("gmailLabelSyncReady",true);setSetting("gmailHistoricalBackfillReady",true);setSetting("gmailLastSyncResult",{at:new Date().toISOString(),...result});if(result.errors.length===0)setSetting("gmailLastSuccessfulSyncResult",{at:new Date().toISOString(),...result});saveState(null)}else saveState(state);
   return result;
