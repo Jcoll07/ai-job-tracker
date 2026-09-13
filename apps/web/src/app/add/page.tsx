@@ -131,9 +131,7 @@ export default function AddJob() {
             <button className="btn primary" onClick={analyze} disabled={busy || !input.trim()}>
               {busy ? "Analyzing…" : "Analyze with AI"}
             </button>
-            <span className="muted">
-              Tip: the Chrome extension captures postings in one click — see Settings.
-            </span>
+            {mode === "url" && <span className="muted">Paste the job posting URL. JobTrackr will analyze it, then let you review and edit the fields before saving.</span>}
           </div>
         </div>
       )}
