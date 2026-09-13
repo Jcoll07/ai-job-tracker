@@ -38,7 +38,7 @@ if next_idx < 0:
 end = text.find(";", next_idx)
 if end < 0:
     raise SystemExit("Malformed Safari extension PRODUCT_BUNDLE_IDENTIFIER setting.")
-text = text[:next_idx] + "PRODUCT_BUNDLE_IDENTIFIER = " + next_id + text[end:]
+text = text[:next_idx] + "PRODUCT_BUNDLE_IDENTIFIER = " + ext_id + text[end:]
 project.write_text(text, encoding="utf-8")
 PY
 grep -q "PRODUCT_BUNDLE_IDENTIFIER = $APP_BUNDLE_ID;" "$PBXPROJ" || { printf '%s\n' "Failed to set containing app Bundle ID." >&2; exit 1; }; grep -q "PRODUCT_BUNDLE_IDENTIFIER = $EXTENSION_BUNDLE_ID;" "$PBXPROJ" || { printf '%s\n' "Failed to set Safari extension Bundle ID." >&2; exit 1; }; grep -q "MACOSX_DEPLOYMENT_TARGET = $MACOS_DEPLOYMENT_TARGET;" "$PBXPROJ" || { printf '%s\n' "Failed to set macOS deployment target to $MACOS_DEPLOYMENT_TARGET." >&2; exit 1; }
