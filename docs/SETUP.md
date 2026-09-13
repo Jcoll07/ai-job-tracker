@@ -10,7 +10,7 @@ cp apps/web/.env.example apps/web/.env.local
 npm run dev        # http://localhost:3001
 ```
 
-Manual job tracking works immediately. AI, Gmail, CV tailoring and extension capture are enabled by the steps below.
+Manual job tracking works immediately. AI, Gmail and CV tailoring are enabled by the steps below.
 
 For a complete local diagnostic, use the single command `npm run verify:local`.
 
@@ -57,30 +57,7 @@ The tracker uses the `gmail.readonly` scope. It does not send, modify or delete 
 
 For hosted deployments, configure `CRON_SECRET`. The repository's `vercel.json` schedules `/api/gmail/sync` every 30 minutes, and Vercel supplies the cron authorization header.
 
-## 4. Safari extension
-
-The extension uses WXT's cross-browser API and the same source code can target Safari and Chromium-based browsers.
-
-To build and package Safari on macOS:
-
-```bash
-npm run package:safari
-```
-
-This builds the Safari target and runs Apple's Safari Web Extension Packager, generating a macOS Xcode project under `apps/extension/safari/`. Apple documents that the packager creates the containing app and Xcode project, with `--copy-resources` copying the extension resources into the generated project. citeturn0search0turn0search1
-
-Open the generated Xcode project, build/run the macOS containing app, and enable JobTrackr under Safari → Settings → Extensions. For unsigned development extensions, Safari may require allowing unsigned extensions. citeturn0search10
-
-In the extension popup, set the server URL to `http://localhost:3001` and paste the token shown under **Settings → Browser Extension**.
-
-## 5. Capture and autofill
-
-- On LinkedIn, Indeed, Greenhouse, Lever, Workday or another job page: open the extension and choose **Save this job to tracker**.
-- On an application form: complete **Profile**, select a CV version in **CV Manager**, then use **Autofill application form**.
-- The extension fills fields but never submits the application for you.
-- Resume attachment is best-effort because some ATS upload widgets intentionally reject programmatic file assignment.
-
-## 6. CV Manager
+## 4. CV Manager
 
 Open **CV Manager** from the top navigation.
 
@@ -90,17 +67,17 @@ Open **CV Manager** from the top navigation.
 4. On a tracked job, open its detail page. The **Fit Score** explains experience, technical, industry, education, location and seniority components and lists strengths/gaps.
 5. Assign the CV version used for the application.
 6. Use **AI tailor → new CV version**. The source version is never overwritten.
-7. Review the generated CV and use **Print / Save PDF** to produce the final PDF from Safari's print dialog.
+7. Review the generated CV and use **Print / Save PDF** to produce the final PDF from the browser's print dialog.
 
 The tailoring prompt is constrained to facts present in the source CV/profile and is not allowed to invent employers, dates, technologies, metrics or responsibilities.
 
-## 7. Backup
+## 5. Backup
 
 **Settings → Data** exports jobs and CV source versions to JSON. Import accepts the old v1 job-only backup format and the new backup format; duplicates are skipped.
 
 Local runtime data is stored under `apps/web/data/` and is not committed to Git.
 
-## 8. Validation
+## 6. Validation
 
 From the repository root:
 
@@ -108,7 +85,7 @@ From the repository root:
 npm run verify:local
 ```
 
-This runs dependency installation, typechecking, production builds, Chrome/Safari extension builds, authenticated API E2E tests and a local AI connectivity check.
+This runs dependency installation, typechecking, production build, authenticated API E2E tests and a local AI connectivity check.
 
 The repository CI workflow runs the build and E2E validation automatically on pushes to `main`/feature branches and pull requests to `main`.
 
@@ -116,6 +93,4 @@ The repository CI workflow runs the build and E2E validation automatically on pu
 
 - **Local AI unavailable:** verify the endpoint responds at `AI_BASE_URL/v1/chat/completions`, then confirm `AI_MODEL` matches the model served by your local runtime.
 - **Gmail `redirect_uri_mismatch`:** the Google Cloud redirect URI must exactly match `http://localhost:3001/api/gmail/callback` for the local setup.
-- **Extension red dot:** confirm the web app is running on port 3001 and that the extension token matches Settings.
-- **Safari extension not visible:** run `npm run package:safari`, build/run the generated containing app in Xcode, then enable the extension in Safari Settings → Extensions. For unsigned development builds, allow unsigned extensions if Safari requires it. citeturn0search10
-- **LinkedIn capture is incomplete:** use the extension while the job page is open; server-side URL fetching can be blocked by some sites.
+- **URL analysis unavailable:** some sites require JavaScript or block automated requests. Use the Copy & Paste path from the Add Job screen when a site does not expose its posting to a server-side fetch.
